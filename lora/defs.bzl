@@ -9,50 +9,143 @@ load("@rules_lora//lora:defs.bzl",
      "expert_manifest")
 ```
 
-All four macros forward to rules in `//lora/private:rules.bzl`,
-which in turn use providers from `//lora/private:providers.bzl`.
+* `lora_dataset`, `lora_recipe`, `lora_base_model` — thin
+  re-exports of the underlying rules.
+* `lora_train` — v0.0.2: now a macro. Always emits the typed
+  jobspec; additionally composes with `@rules_runpod` when
+  `backend = "runpod"` to emit a synthesized manifest +
+  `runpod_job`, giving the user `bazel run :<name>.runpod_job.run`.
+* `expert_manifest` — bundle N adapters as the routing input.
 
-The macros are thin wrappers (no logic) — keep them stable; let
-the underlying rules evolve.
+Macros forward to rules in `//lora/private:rules.bzl`, which fill
+providers from `//lora/private:providers.bzl`.
 """
 
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@rules_runpod//runpod:defs.bzl", "runpod_job", "runpod_manifest")
 load(
     "//lora/private:rules.bzl",
     _lora_base_model = "lora_base_model",
     _lora_dataset = "lora_dataset",
     _lora_recipe = "lora_recipe",
-    _lora_train = "lora_train",
+    _lora_train_rule = "lora_train",
 )
 
-# Re-exports — public surface.
+# Re-exports — public surface for the simple rules.
 lora_base_model = _lora_base_model
 lora_dataset = _lora_dataset
 lora_recipe = _lora_recipe
-lora_train = _lora_train
+
+# Default RunPod image + GPU. Used by `lora_train` when
+# `backend = "runpod"` and no explicit override is passed.
+_DEFAULT_RUNPOD_GPU = "NVIDIA H100 80GB HBM3"
+_DEFAULT_RUNPOD_IMAGE = "runpod/pytorch:2.5.1-py3.11-cuda12.4.1-devel-ubuntu22.04"
+
+def lora_train(
+        name,
+        base,
+        recipe,
+        dataset,
+        backend = "runpod",
+        # RunPod-only knobs:
+        runpod_gpu = None,
+        runpod_image = None,
+        visibility = None):
+    """Declare a LoRA training run.
+
+    Always emits the typed `lora.v1.TrainingJobSpec` JSON
+    (`<name>.jobspec.json`). When `backend == "runpod"`, also
+    composes with `@rules_runpod` to produce:
+
+      * `<name>_runpod_manifest_toml` — synthesized runpod TOML
+        (build action via `write_file`).
+      * `<name>_runpod_manifest` — typed manifest target.
+      * `<name>_runpod_job` — typed job spec + `bazel run`-able
+        `<name>_runpod_job.run` sibling.
+
+    The synthesized manifest's `setup` installs torchtune and the
+    `run` block is a v0 placeholder; the real torchtune wiring
+    lands in rules_lora v0.0.3 (`runtime/torchtune_runner/` becomes
+    a runnable entrypoint that reads the jobspec).
+
+    Args:
+      name: target name.
+      base: label to a `lora_base_model` target.
+      recipe: label to a `lora_recipe` target.
+      dataset: label to a `lora_dataset` target.
+      backend: one of "local" | "runpod" | "modal".
+      runpod_gpu: override the default RunPod GPU type.
+      runpod_image: override the default RunPod image.
+      visibility: standard bazel visibility.
+    """
+    _lora_train_rule(
+        name = name,
+        base = base,
+        recipe = recipe,
+        dataset = dataset,
+        backend = backend,
+        visibility = visibility,
+    )
+
+    if backend != "runpod":
+        return
+
+    pod_type = runpod_gpu or _DEFAULT_RUNPOD_GPU
+    image = runpod_image or _DEFAULT_RUNPOD_IMAGE
+
+    # Synthesize a runpod manifest TOML. v0.0.2: setup installs
+    # torchtune and the run block is a placeholder pending
+    # rules_lora v0.0.3's pod-side entrypoint.
+    write_file(
+        name = name + "_runpod_manifest_toml",
+        out = name + "_runpod.toml",
+        content = [
+            'name = "lora-' + name + '"',
+            'workdir = "."',
+            'outputs = ["adapter-' + name + '"]',
+            "",
+            "[resources]",
+            'gpu_type = "' + pod_type + '"',
+            'image = "' + image + '"',
+            "",
+            'setup = """',
+            "set -euo pipefail",
+            'echo "lora-' + name + ': setup — install torchtune"',
+            "pip install torchtune || true",
+            '"""',
+            "",
+            'run = """',
+            "set -euo pipefail",
+            'echo "lora-' + name + ': train — v0 placeholder, real wiring in rules_lora v0.0.3"',
+            '"""',
+        ],
+        visibility = ["//visibility:private"],
+    )
+
+    runpod_manifest(
+        name = name + "_runpod_manifest",
+        src = ":" + name + "_runpod_manifest_toml",
+        workdir = ".",
+        outputs = ["adapter-" + name],
+        visibility = visibility,
+    )
+
+    runpod_job(
+        name = name + "_runpod_job",
+        manifest = ":" + name + "_runpod_manifest",
+        pod_type = pod_type,
+        image = image,
+        visibility = visibility,
+    )
 
 def expert_manifest(name, adapters, routing = "nearest_centroid",
                     cluster_manifest = None, visibility = None):
     """Bundle N trained adapters into an `ExpertManifest.binpb`.
 
-    The binpb wire-shape matches
-    `[[rules_agentic_ide]]/proto/agentic_ide/v1/experts.proto`
-    so the router in that repo can consume the output directly.
-
-    Args:
-      name: target name.
-      adapters: list of labels to `lora_train` targets.
-      routing: routing policy. One of {nearest_centroid,
-               hull_membership, soft_top_k}.
-      cluster_manifest: optional label to a `ClusterManifest.binpb`
-                        that this expert set is paired with.
-      visibility: standard bazel visibility.
-
-    TODO(v0.2): emit the binpb action. v0.1 stops at the JSON
-    sidecar shape, which is enough for the routing prototype.
+    Wire shape mirrors `[[rules_agentic_ide]]`'s
+    `agentic_ide.v1.ExpertManifest`. v0.0.1: placeholder filegroup;
+    v0.0.2 emits the real binpb.
     """
-
-    # Placeholder filegroup; real rule lands in v0.2 once we have
-    # at least one `lora_train` target producing a real adapter.
     native.filegroup(
         name = name,
         srcs = adapters,

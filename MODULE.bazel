@@ -22,6 +22,16 @@ bazel_dep(name = "rules_uv", version = "0.7.3")
 # rules_rust — the runpod orchestrator + hf_resolver are Rust binaries.
 bazel_dep(name = "rules_rust", version = "0.70.0")
 
+# rules_runpod — backs the `runpod` backend of `lora_train`. The
+# `lora_train(backend = "runpod", ...)` macro emits a synthesized
+# manifest + `runpod_job` so the user can `bazel run :<train>.run`
+# end-to-end. Sibling premium repo.
+bazel_dep(name = "rules_runpod", version = "0.0.2")
+local_path_override(
+    module_name = "rules_runpod",
+    path = "../rules_runpod",
+)
+
 # rules_proto — the LoRA contract (TrainingJobSpec, AdapterArtifact,
 # ExpertManifest envelope) is proto-defined so consumers in Rust,
 # Python, and Lean can speak the same schema.

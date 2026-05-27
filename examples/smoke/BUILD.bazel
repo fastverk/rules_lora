@@ -41,5 +41,5 @@ lora_train(
     base = ":tiny_base",
     recipe = ":tiny_recipe",
     dataset = ":tiny_sft",
-    backend = "local",
+    backend = "runpod",
 )
