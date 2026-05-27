@@ -5,6 +5,38 @@ All notable changes to rules_lora. The format is loosely
 mirror the published bazel-registry entries (when we publish; for
 now this repo is premium / private).
 
+## 0.0.28 — Wandb integration (runpod backend)
+
+Opt-in W&B tracking on `lora_train(backend="runpod")`. Pattern
+mirrors prime-transformer's runpod-side wandb wiring:
+
+```python
+lora_train(
+    name = "parser_full_jobspec",
+    ...
+    backend = "runpod",
+    wandb_project = "agora",   # NEW
+)
+```
+
+When `wandb_project` is non-empty, the synthesized manifest:
+
+  1. Sets `forward_envs = ["WANDB_API_KEY"]` so runpod-cli
+     propagates the local secret to the pod.
+  2. Adds `wandb` to the pip-install in setup.
+  3. Runs `wandb login --relogin "$WANDB_API_KEY"` (silent on
+     success, warns + continues without W&B on failure or
+     missing key).
+  4. Renders torchtune's `metric_logger` as `WandBLogger` with
+     `project = <wandb_project>` and `name = <adapter_name>`.
+
+Empty `wandb_project` (the default) is unchanged from 0.0.27:
+no wandb pip install, no env forward, `StdoutLogger` only.
+
+Caller needs to: have `WANDB_API_KEY` in the local env when
+invoking `bazel run :<job>_runpod_job.run`. The key is forwarded
+via SSH env, not baked into the manifest TOML.
+
 ## 0.0.27 — Align runpod torchtune pin with local + dump config
 
 0.0.26's runpod-side install pinned torchtune==0.3.1; local backend

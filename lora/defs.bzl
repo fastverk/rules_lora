@@ -56,6 +56,12 @@ def lora_train(
         runpod_gpu = None,
         runpod_image = None,
         runpod_cloud = "SECURE",
+        # Empty = no wandb. Set to the W&B project name (e.g.
+        # "agora", "rules_agentic_ide") to enable W&B tracking
+        # for backend = "runpod" runs. The pod will pip-install
+        # wandb, forward WANDB_API_KEY from the local env, log
+        # in, and torchtune's metric_logger becomes WandBLogger.
+        wandb_project = "",
         visibility = None):
     """Declare a LoRA training run.
 
@@ -140,6 +146,7 @@ def lora_train(
         gpu_type = pod_type,
         image = image,
         cloud_type = runpod_cloud,
+        wandb_project = wandb_project,
         visibility = ["//visibility:private"],
     )
 

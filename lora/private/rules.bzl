@@ -384,6 +384,7 @@ def _lora_runpod_manifest_synth_impl(ctx):
     args.add("--micro-batch-size", recipe.micro_batch_size)
     args.add("--grad-accum-steps", recipe.grad_accum_steps)
     args.add("--epochs", recipe.epochs)
+    args.add("--wandb-project", ctx.attr.wandb_project)
     args.add("--out", out.path)
 
     ctx.actions.run(
@@ -425,6 +426,12 @@ lora_runpod_manifest_synth = rule(
                 "iteration runs where availability matters."
             ),
         ),
+        # Empty = no wandb (StdoutLogger only, current default).
+        # Set to the wandb project name to enable: the manifest
+        # forwards WANDB_API_KEY from the local env, the pod-side
+        # setup pip-installs wandb + `wandb login`s, and the
+        # rendered torchtune metric_logger becomes WandBLogger.
+        "wandb_project": attr.string(default = ""),
         "_synth": attr.label(
             default = "@rules_lora//runtime/runpod_orchestrator:runpod_orchestrator",
             executable = True,

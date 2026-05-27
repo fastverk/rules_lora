@@ -102,6 +102,11 @@ enum Cmd {
         /// Number of epochs.
         #[arg(long)]
         epochs: u32,
+        /// Optional wandb project. When non-empty, the rendered
+        /// manifest forwards WANDB_API_KEY, pip-installs wandb,
+        /// and swaps torchtune's StdoutLogger for WandBLogger.
+        #[arg(long, default_value = "")]
+        wandb_project: String,
         /// Destination path for the manifest TOML.
         #[arg(long)]
         out: PathBuf,
@@ -142,10 +147,12 @@ fn main() -> Result<()> {
             micro_batch_size,
             grad_accum_steps,
             epochs,
+            wandb_project,
             out,
         } => write_runpod_manifest(WriteRunpodManifestArgs {
             name,
             dataset_src,
+            wandb_project,
             gpu_type,
             image,
             base_id,
@@ -237,6 +244,12 @@ struct WriteRunpodManifestArgs {
     micro_batch_size: u32,
     grad_accum_steps: u32,
     epochs: u32,
+    /// Optional wandb project. When set, the manifest forwards
+    /// WANDB_API_KEY from the local env, `pip install wandb` runs
+    /// in setup, and the rendered torchtune config swaps
+    /// `StdoutLogger` for `WandBLogger` with this project name.
+    /// Empty string = no wandb (StdoutLogger only).
+    wandb_project: String,
     out: PathBuf,
 }
 
@@ -296,6 +309,48 @@ fn render_manifest_toml(
     target_modules_yaml: &str,
     fc: &FamilyComponents,
 ) -> String {
+    // Wandb integration is opt-in by setting `wandb_project` on the
+    // `lora_train` macro. When set:
+    //   * `forward_envs = ["WANDB_API_KEY"]` propagates the local
+    //     secret to the pod (runpod-cli's manifest schema field).
+    //   * `pip install wandb` runs in setup.
+    //   * `wandb login --relogin "$WANDB_API_KEY"` authenticates.
+    //   * The rendered torchtune metric_logger swaps StdoutLogger
+    //     for WandBLogger with the configured project + run name.
+    let wandb_enabled = !a.wandb_project.is_empty();
+    let forward_envs = if wandb_enabled {
+        "\nforward_envs = [\"WANDB_API_KEY\"]"
+    } else {
+        ""
+    };
+    let wandb_pip = if wandb_enabled { " wandb" } else { "" };
+    let wandb_login = if wandb_enabled {
+        r#"
+if [ -n "${WANDB_API_KEY:-}" ]; then
+    wandb login --relogin "$WANDB_API_KEY" >/dev/null 2>&1 \
+        && echo "[lora-PLACEHOLDER_NAME] setup: wandb authenticated" \
+        || echo "[lora-PLACEHOLDER_NAME] setup: wandb login failed (continuing without W&B)" >&2
+else
+    echo "[lora-PLACEHOLDER_NAME] setup: WANDB_API_KEY not set; W&B disabled" >&2
+fi
+"#
+    } else {
+        ""
+    };
+    // The wandb_login fragment uses PLACEHOLDER_NAME so the
+    // double-curly format escape doesn't conflict with the inner
+    // bash. We do the name interpolation as a separate `replace`
+    // *after* format!() has resolved its own curly placeholders.
+    let wandb_login = wandb_login.replace("PLACEHOLDER_NAME", &a.name);
+    let metric_logger_yaml = if wandb_enabled {
+        format!(
+            "  _component_: torchtune.training.metric_logging.WandBLogger\n  \
+             project: {}\n  name: {}",
+            a.wandb_project, a.name,
+        )
+    } else {
+        "  _component_: torchtune.training.metric_logging.StdoutLogger".to_string()
+    };
     // Top-level keys (name, setup, run) come *before* the `[resources]`
     // table — otherwise TOML parses them as members of that table and
     // runpod-cli's Manifest struct rejects the manifest with
@@ -307,7 +362,7 @@ workdir = "."
 # to ($(pwd)/outputs/adapter-{name}/). v0.0.23 had this as
 # `["adapter-{name}"]` — the rsync pull then looked at the wrong
 # path on the pod and silently dropped the adapter.
-outputs = ["outputs/adapter-{name}"]
+outputs = ["outputs/adapter-{name}"]{forward_envs}
 
 setup = """
 set -euo pipefail
@@ -323,7 +378,7 @@ pip install --quiet --no-input \
     "torchtune==0.4.0" \
     "huggingface_hub[cli]" \
     transformers \
-    datasets
+    datasets{wandb_pip}{wandb_login}
 
 # Pre-fetch the base model. `hf download` is idempotent and prints
 # the cached path on stdout — capture it for the train step.
@@ -427,7 +482,7 @@ dtype: bf16
 compile: False
 enable_activation_checkpointing: False
 metric_logger:
-  _component_: torchtune.training.metric_logging.StdoutLogger
+{metric_logger_yaml}
 log_every_n_steps: 1
 log_peak_memory_stats: True
 profiler:
@@ -452,6 +507,10 @@ cloud_type = "{cloud_type}"
 "#,
         name = a.name,
         dataset_src = a.dataset_src,
+        forward_envs = forward_envs,
+        wandb_pip = wandb_pip,
+        wandb_login = wandb_login,
+        metric_logger_yaml = metric_logger_yaml,
         gpu_type = a.gpu_type,
         image = a.image,
         base_id = a.base_id,
