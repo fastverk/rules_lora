@@ -236,14 +236,21 @@ lora_train = rule(
 # sh_binary in the macro layer as its `srcs`.
 
 def _runfiles_path(file, ctx):
-    """Compute the file's runfiles-relative path."""
-    ws = file.owner.workspace_name
-    if not ws:
-        # Main repo file. Under bzlmod the runfiles prefix is the
-        # apparent name of the main module — which Bazel exposes as
-        # `ctx.workspace_name`.
-        ws = ctx.workspace_name
-    return ws + "/" + file.short_path
+    """Compute the file's runfiles-relative path.
+
+    Files from the main repository have `short_path` like
+    `training/parser_recipe.yaml` and a runfiles path of
+    `<main_ws>/training/parser_recipe.yaml`.
+
+    Files from external repos have `short_path` like
+    `../rules_lora+/runtime/local_runner/local_runner.sh` (the
+    `../` escapes the main-repo subtree); the canonical runfiles
+    path strips the leading `../`.
+    """
+    short = file.short_path
+    if short.startswith("../"):
+        return short[len("../"):]
+    return ctx.workspace_name + "/" + short
 
 def _lora_local_runner_impl(ctx):
     out = ctx.actions.declare_file(ctx.label.name + ".sh")
