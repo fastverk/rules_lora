@@ -29,6 +29,7 @@ load(
     _lora_corpus = "lora_corpus",
     _lora_dataset = "lora_dataset",
     _lora_recipe = "lora_recipe",
+    _lora_runpod_manifest_synth = "lora_runpod_manifest_synth",
     _lora_train_rule = "lora_train",
 )
 
@@ -95,32 +96,19 @@ def lora_train(
     pod_type = runpod_gpu or _DEFAULT_RUNPOD_GPU
     image = runpod_image or _DEFAULT_RUNPOD_IMAGE
 
-    # Synthesize a runpod manifest TOML. v0.0.2: setup installs
-    # torchtune and the run block is a placeholder pending
-    # rules_lora v0.0.3's pod-side entrypoint.
-    write_file(
+    # v0.0.4: the manifest TOML is synthesized by the Rust binary in
+    # //runtime/runpod_orchestrator. setup installs torchtune + the
+    # HF CLI and pre-fetches the base model; run renders an effective
+    # torchtune config from the rule's recipe attrs and invokes
+    # `tune run lora_finetune_single_device`. Replaces the v0.0.2
+    # `echo placeholder` and its `write_file` synth.
+    _lora_runpod_manifest_synth(
         name = name + "_runpod_manifest_toml",
-        out = name + "_runpod.toml",
-        content = [
-            'name = "lora-' + name + '"',
-            'workdir = "."',
-            'outputs = ["adapter-' + name + '"]',
-            "",
-            "[resources]",
-            'gpu_type = "' + pod_type + '"',
-            'image = "' + image + '"',
-            "",
-            'setup = """',
-            "set -euo pipefail",
-            'echo "lora-' + name + ': setup — install torchtune"',
-            "pip install torchtune || true",
-            '"""',
-            "",
-            'run = """',
-            "set -euo pipefail",
-            'echo "lora-' + name + ': train — v0 placeholder, real wiring in rules_lora v0.0.3"',
-            '"""',
-        ],
+        adapter_name = name,
+        recipe = recipe,
+        base = base,
+        gpu_type = pod_type,
+        image = image,
         visibility = ["//visibility:private"],
     )
 

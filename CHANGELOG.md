@@ -5,6 +5,52 @@ All notable changes to rules_lora. The format is loosely
 mirror the published bazel-registry entries (when we publish; for
 now this repo is premium / private).
 
+## 0.0.4 — `lora_train` pod-side manifest invokes real torchtune
+
+The v0.0.2 `write_file` placeholder (`run = """echo placeholder"""`)
+is replaced with `lora_runpod_manifest_synth`, a private rule that
+calls the Rust binary `//runtime/runpod_orchestrator
+write-runpod-manifest`. The Rust binary reads `LoraRecipeInfo` +
+`LoraBaseModelInfo` and renders a manifest TOML whose `setup` and
+`run` blocks:
+
+  * Install `torchtune`, `huggingface_hub[cli]`, `transformers`,
+    `datasets` on the pod's pre-baked pytorch image.
+  * Pre-fetch the base model (revision-pinned) and stash the
+    cached path for the train step.
+  * Render an effective torchtune config YAML inline by
+    interpolating the LoRA hyperparams + per-job paths.
+  * Invoke `tune run lora_finetune_single_device --config ...` —
+    the real torchtune LoRA fine-tune loop.
+  * Drop the adapter at `outputs/adapter-<name>/`.
+
+Supported model families today (selected by a `family` attr on the
+synth rule, default `qwen2`):
+
+  * Qwen2.5 family (`qwen2`)
+  * Llama 3 family (`llama3`)
+  * Mistral family (`mistral`)
+
+Each maps to the matching torchtune tokenizer + lora model
+component. Extending the matrix is a single match arm in the Rust
+binary plus the corresponding tokenizer convention.
+
+`LoraRecipeInfo` gains three new fields propagated from the
+`lora_recipe` rule attrs:
+
+  * `learning_rate: str`     (kept as string so `2e-4` survives)
+  * `micro_batch_size: int`
+  * `grad_accum_steps: int`
+
+These were previously rendered only into the recipe YAML; the
+manifest synth needs them as structured attrs.
+
+Smoke at `examples/smoke/`:
+
+    bazel build //examples/smoke:smoke_jobspec_runpod_manifest_toml
+    # renders a TOML whose `run` block has real `tune run` invocation
+    # instead of the v0.0.2 placeholder.
+
 ## 0.0.3 — `lora_corpus` rule with corpus-DAG deps
 
 New public macro `lora_corpus`: declare an SFT dataset *produced by

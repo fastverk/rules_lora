@@ -91,6 +91,9 @@ def _lora_recipe_impl(ctx):
             rank = ctx.attr.rank,
             alpha = ctx.attr.alpha,
             target_modules = ctx.attr.target_modules,
+            learning_rate = ctx.attr.learning_rate,
+            micro_batch_size = ctx.attr.micro_batch_size,
+            grad_accum_steps = ctx.attr.grad_accum_steps,
             epochs = ctx.attr.epochs,
             sha = "",  # filled by the renderer's sidecar
         ),
@@ -204,6 +207,75 @@ lora_train = rule(
         ),
         "_spec_writer": attr.label(
             default = "@rules_lora//runtime/runpod_orchestrator:write_jobspec",
+            executable = True,
+            cfg = "exec",
+        ),
+    },
+)
+
+# ============================================================
+# _lora_runpod_manifest_synth — synthesize the pod-side TOML.
+# ============================================================
+#
+# Replaces the v0.0.2 hand-rolled `write_file` placeholder with a
+# real torchtune-invoking manifest, rendered by the Rust binary in
+# //runtime/runpod_orchestrator. The rule reads LoraRecipeInfo +
+# LoraBaseModelInfo providers and forwards the relevant fields to
+# the orchestrator's `write-runpod-manifest` subcommand.
+#
+# `family` selects the torchtune model component (qwen2 / llama3 /
+# mistral). The default `qwen2` matches the LoRA-trained NL→capability
+# parser in agora — extend the match arm in the orchestrator when a
+# new family lands.
+def _lora_runpod_manifest_synth_impl(ctx):
+    out = ctx.actions.declare_file(ctx.label.name + ".toml")
+    recipe = ctx.attr.recipe[LoraRecipeInfo]
+    base = ctx.attr.base[LoraBaseModelInfo]
+
+    args = ctx.actions.args()
+    args.add("write-runpod-manifest")
+    args.add("--name", ctx.attr.adapter_name)
+    args.add("--gpu-type", ctx.attr.gpu_type)
+    args.add("--image", ctx.attr.image)
+    args.add("--base-id", base.id)
+    args.add("--base-revision", base.revision)
+    args.add("--family", ctx.attr.family)
+    args.add("--rank", recipe.rank)
+    args.add("--alpha", recipe.alpha)
+    args.add_joined("--target-modules", recipe.target_modules, join_with = ",")
+    args.add("--learning-rate", recipe.learning_rate)
+    args.add("--micro-batch-size", recipe.micro_batch_size)
+    args.add("--grad-accum-steps", recipe.grad_accum_steps)
+    args.add("--epochs", recipe.epochs)
+    args.add("--out", out.path)
+
+    ctx.actions.run(
+        executable = ctx.executable._synth,
+        outputs = [out],
+        arguments = [args],
+        mnemonic = "LoraRunpodManifestSynth",
+        progress_message = "Synthesizing runpod manifest for %s" % ctx.label,
+    )
+    return [DefaultInfo(files = depset([out]))]
+
+lora_runpod_manifest_synth = rule(
+    implementation = _lora_runpod_manifest_synth_impl,
+    attrs = {
+        "adapter_name": attr.string(
+            mandatory = True,
+            doc = "Adapter name used in `lora-<name>` job + output paths.",
+        ),
+        "recipe": attr.label(mandatory = True, providers = [LoraRecipeInfo]),
+        "base": attr.label(mandatory = True, providers = [LoraBaseModelInfo]),
+        "gpu_type": attr.string(mandatory = True),
+        "image": attr.string(mandatory = True),
+        "family": attr.string(
+            default = "qwen2",
+            values = ["qwen2", "llama3", "mistral"],
+            doc = "torchtune model family — selects tokenizer + model component.",
+        ),
+        "_synth": attr.label(
+            default = "@rules_lora//runtime/runpod_orchestrator:runpod_orchestrator",
             executable = True,
             cfg = "exec",
         ),
