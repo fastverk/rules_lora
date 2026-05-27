@@ -5,6 +5,11 @@ All notable changes to rules_lora. The format is loosely
 mirror the published bazel-registry entries (when we publish; for
 now this repo is premium / private).
 
+## 0.0.14 — Drop unsupported model arg
+
+`lora_qwen2_1_5b` doesn't accept `apply_lora_to_output`. Remove
+it; add `lora_dropout: 0.0` for parity with the builder's default.
+
 ## 0.0.13 — Use size-specific torchtune model builder
 
 `torchtune.models.qwen2.lora_qwen2` requires every architectural arg

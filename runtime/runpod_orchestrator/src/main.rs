@@ -358,9 +358,9 @@ model:
   _component_: {model_lora}
   lora_attn_modules: [{target_modules_yaml}]
   apply_lora_to_mlp: False
-  apply_lora_to_output: False
   lora_rank: {rank}
   lora_alpha: {alpha}
+  lora_dropout: 0.0
 
 checkpointer:
   _component_: torchtune.training.FullModelHFCheckpointer
