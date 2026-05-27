@@ -5,6 +5,15 @@ All notable changes to rules_lora. The format is loosely
 mirror the published bazel-registry entries (when we publish; for
 now this repo is premium / private).
 
+## 0.0.16 — Manifest `outputs` path matches torchtune save dir
+
+v0.0.15 declared the manifest's `outputs = ["adapter-<name>"]`
+but the synthesized run script saves to
+`$(pwd)/outputs/adapter-<name>`. The mismatch silently failed
+runpod-cli's post-train rsync-back: the adapter trained, the pod
+terminated (ephemeral), but the local `outputs/` ended up empty.
+Fix: outputs becomes `["outputs/adapter-<name>"]`.
+
 ## 0.0.15 — Drop `o_proj` default + ephemeral pod
 
 Two paper-iteration QoL fixes:

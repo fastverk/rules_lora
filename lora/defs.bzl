@@ -118,7 +118,11 @@ def lora_train(
         name = name + "_runpod_manifest",
         src = ":" + name + "_runpod_manifest_toml",
         workdir = ".",
-        outputs = ["adapter-" + name],
+        # The synthesized run script writes to
+        # `$(pwd)/outputs/adapter-<name>` so the path runpod-cli's
+        # post-train rsync looks for matches it. v0.0.15 had this as
+        # `["adapter-<name>"]` which silently failed the pull.
+        outputs = ["outputs/adapter-" + name],
         visibility = visibility,
     )
 
