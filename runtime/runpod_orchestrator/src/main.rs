@@ -314,9 +314,9 @@ echo "[lora-{name}] train: starting"
 
 MODEL_DIR="$(cat /tmp/lora-{name}.model_dir)"
 # Walk every .jsonl in the workdir, pick the first whose first line
-# is a `messages_v1` row (`{"messages": [...]}`). Robust to whatever
-# naming convention the consumer uses (sft.jsonl, dataset.jsonl,
-# parser_seed_dataset.jsonl, ...).
+# is a `messages_v1` row (i.e. starts with the `messages` JSON key).
+# Robust to whatever naming convention the consumer uses (sft.jsonl,
+# dataset.jsonl, parser_seed_dataset.jsonl, ...).
 DATASET=""
 while IFS= read -r f; do
     head -c 12 "$f" 2>/dev/null | grep -q '"messages"' || continue

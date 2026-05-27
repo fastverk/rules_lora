@@ -5,7 +5,14 @@ All notable changes to rules_lora. The format is loosely
 mirror the published bazel-registry entries (when we publish; for
 now this repo is premium / private).
 
-## 0.0.8 — Pod-side dataset auto-detect by content sniff
+## 0.0.9 — Fix format string in v0.0.8 (yanked)
+
+v0.0.8 shipped a Rust `format!` template with an unescaped `{`
+inside a comment of the bash heredoc; the orchestrator binary
+failed to compile. 0.0.9 swaps the offending JSON-snippet in the
+comment for a prose description.
+
+## 0.0.8 — Pod-side dataset auto-detect by content sniff (yanked)
 
 v0.0.4–v0.0.7's pod-side `run` block tried to find the SFT JSONL via
 naming heuristic (`*lora_dataset*` or `dataset.jsonl`). That missed
