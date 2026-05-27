@@ -240,6 +240,7 @@ def _lora_runpod_manifest_synth_impl(ctx):
     args.add("--base-id", base.id)
     args.add("--base-revision", base.revision)
     args.add("--family", ctx.attr.family)
+    args.add("--cloud-type", ctx.attr.cloud_type)
     args.add("--rank", recipe.rank)
     args.add("--alpha", recipe.alpha)
     args.add_joined("--target-modules", recipe.target_modules, join_with = ",")
@@ -273,6 +274,15 @@ lora_runpod_manifest_synth = rule(
             default = "qwen2",
             values = ["qwen2", "llama3", "mistral"],
             doc = "torchtune model family — selects tokenizer + model component.",
+        ),
+        "cloud_type": attr.string(
+            default = "SECURE",
+            values = ["COMMUNITY", "SECURE"],
+            doc = (
+                "RunPod cloud tier. COMMUNITY is cheaper but often " +
+                "exhausted; SECURE is the right default for paper-" +
+                "iteration runs where availability matters."
+            ),
         ),
         "_synth": attr.label(
             default = "@rules_lora//runtime/runpod_orchestrator:runpod_orchestrator",

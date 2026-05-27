@@ -53,6 +53,7 @@ def lora_train(
         # RunPod-only knobs:
         runpod_gpu = None,
         runpod_image = None,
+        runpod_cloud = "SECURE",
         visibility = None):
     """Declare a LoRA training run.
 
@@ -109,6 +110,7 @@ def lora_train(
         base = base,
         gpu_type = pod_type,
         image = image,
+        cloud_type = runpod_cloud,
         visibility = ["//visibility:private"],
     )
 

@@ -67,6 +67,11 @@ enum Cmd {
         /// config.
         #[arg(long, default_value = "qwen2")]
         family: String,
+        /// RunPod cloud tier ("COMMUNITY" or "SECURE"). COMMUNITY is
+        /// cheaper but often exhausted; SECURE is the right default
+        /// for paper-iteration runs where availability matters.
+        #[arg(long, default_value = "SECURE")]
+        cloud_type: String,
         /// LoRA rank.
         #[arg(long)]
         rank: u32,
@@ -119,6 +124,7 @@ fn main() -> Result<()> {
             base_id,
             base_revision,
             family,
+            cloud_type,
             rank,
             alpha,
             target_modules,
@@ -134,6 +140,7 @@ fn main() -> Result<()> {
             base_id,
             base_revision,
             family,
+            cloud_type,
             rank,
             alpha,
             target_modules,
@@ -210,6 +217,7 @@ struct WriteRunpodManifestArgs {
     base_id: String,
     base_revision: String,
     family: String,
+    cloud_type: String,
     rank: u32,
     alpha: u32,
     target_modules: String,
@@ -385,6 +393,7 @@ echo "[lora-{name}] train: complete; outputs at ${{OUTPUT_DIR}}"
 [resources]
 gpu_type = "{gpu_type}"
 image = "{image}"
+cloud_type = "{cloud_type}"
 "#,
         name = a.name,
         gpu_type = a.gpu_type,
@@ -395,6 +404,7 @@ image = "{image}"
         model_lora = fc.model_lora,
         ckpt_type = fc.checkpoint_model_type,
         target_modules_yaml = target_modules_yaml,
+        cloud_type = a.cloud_type,
         rank = a.rank,
         alpha = a.alpha,
         learning_rate = a.learning_rate,

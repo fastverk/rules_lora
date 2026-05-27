@@ -5,6 +5,17 @@ All notable changes to rules_lora. The format is loosely
 mirror the published bazel-registry entries (when we publish; for
 now this repo is premium / private).
 
+## 0.0.6 — `lora_train(runpod_cloud = "SECURE")` knob
+
+Adds a `runpod_cloud` attr to the `lora_train` macro (default
+`"SECURE"`). Threads through to the synthesized manifest's
+`[resources].cloud_type`. SECURE is the right default for
+paper-iteration runs — COMMUNITY tier is frequently exhausted
+for popular GPU types (H100 / A100 / A40) and the resulting
+`create_pod: HTTP 500: There are no instances currently available`
+error is a poor first-run experience. Override to `"COMMUNITY"`
+when cost matters more than availability.
+
 ## 0.0.5 — runpod manifest TOML structure fix
 
 v0.0.4 emitted a TOML where `setup` and `run` followed `[resources]`,
