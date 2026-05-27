@@ -1,0 +1,3 @@
+what is the lean theorem proving language
+how does bazel resolve module deps
+where is the protobuf schema for the harness

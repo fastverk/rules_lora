@@ -1,0 +1,44 @@
+load("@rules_python//python:defs.bzl", "py_binary")
+load(
+    "@rules_lora//lora:defs.bzl",
+    "lora_corpus",
+    "lora_dataset",
+)
+
+# Smoke example for `lora_corpus` (v0.0.3).
+#
+# Two corpora chained: `base_corpus` transforms a raw text file into
+# messages_v1 SFT rows; `derived_corpus` takes `base_corpus` as a dep
+# AND its own raw source, exercising both `source` and `deps`.
+
+py_binary(
+    name = "smoke_transform",
+    srcs = ["transform.py"],
+    main = "transform.py",
+)
+
+lora_corpus(
+    name = "base_corpus",
+    source = ["raw_prompts.txt"],
+    transform = ":smoke_transform",
+    schema = "messages_v1",
+    min_examples = 3,
+)
+
+lora_corpus(
+    name = "derived_corpus",
+    source = ["raw_prompts.txt"],
+    transform = ":smoke_transform",
+    deps = [":base_corpus"],
+    schema = "messages_v1",
+    # 3 (source) + 3 (dep) = 6 rows expected.
+    min_examples = 6,
+)
+
+# Demonstrate that a `lora_corpus` plugs in wherever `lora_dataset`
+# is accepted: alias the corpus as a dataset for downstream training
+# pipelines.
+alias(
+    name = "derived_corpus_as_dataset",
+    actual = ":derived_corpus",
+)

@@ -26,6 +26,7 @@ load("@rules_runpod//runpod:defs.bzl", "runpod_job", "runpod_manifest")
 load(
     "//lora/private:rules.bzl",
     _lora_base_model = "lora_base_model",
+    _lora_corpus = "lora_corpus",
     _lora_dataset = "lora_dataset",
     _lora_recipe = "lora_recipe",
     _lora_train_rule = "lora_train",
@@ -33,6 +34,7 @@ load(
 
 # Re-exports — public surface for the simple rules.
 lora_base_model = _lora_base_model
+lora_corpus = _lora_corpus
 lora_dataset = _lora_dataset
 lora_recipe = _lora_recipe
 

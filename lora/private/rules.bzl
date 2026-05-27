@@ -209,3 +209,115 @@ lora_train = rule(
         ),
     },
 )
+
+# ============================================================
+# lora_corpus — typed corpus rule.
+# ============================================================
+#
+# A `lora_corpus` is a `lora_dataset` produced by running a
+# user-supplied `transform` binary over a `source` filegroup,
+# optionally chained from upstream corpora declared via `deps`.
+#
+# The transform contract (CLI):
+#   * Repeated  --input <path>       once per file in `source`.
+#   * Repeated  --corpus-dep <path>  once per validated upstream
+#                                    `lora_corpus` / `lora_dataset` JSONL.
+#   * Single    --output <path>      where to write the SFT JSONL.
+#
+# Consumers see a `LoraDatasetInfo`, so `lora_corpus` plugs in
+# anywhere `lora_dataset` is accepted (notably as the `dataset`
+# attr of `lora_train`).
+#
+# Versioning: v0.0.3 introduces this rule. Corpus deps form a DAG
+# (Bazel enforces no cycles); transitive deps are propagated only
+# through Bazel's build graph — the rule itself flattens to the
+# direct deps when invoking the transform (the upstream corpora's
+# transforms have already run and produced their JSONL artifacts).
+def _lora_corpus_impl(ctx):
+    raw_out = ctx.actions.declare_file(ctx.label.name + ".raw.jsonl")
+    val_out = ctx.actions.declare_file(ctx.label.name + ".jsonl")
+    sha_out = ctx.actions.declare_file(ctx.label.name + ".sha")
+
+    # ─── Step 1: invoke the user-supplied transform. ───
+    transform_args = ctx.actions.args()
+    transform_inputs = []
+    for src in ctx.files.source:
+        transform_args.add("--input", src.path)
+        transform_inputs.append(src)
+    for dep in ctx.attr.deps:
+        dep_jsonl = dep[LoraDatasetInfo].jsonl
+        transform_args.add("--corpus-dep", dep_jsonl.path)
+        transform_inputs.append(dep_jsonl)
+    transform_args.add("--output", raw_out.path)
+    ctx.actions.run(
+        executable = ctx.executable.transform,
+        inputs = transform_inputs,
+        outputs = [raw_out],
+        arguments = [transform_args],
+        mnemonic = "LoraCorpusTransform",
+        progress_message = "Transforming corpus %s" % ctx.label,
+    )
+
+    # ─── Step 2: validate the transform output. ───
+    # Reuses the same validator as `lora_dataset` so the schema /
+    # min_examples / sha contract is identical across both rules.
+    val_args = ctx.actions.args()
+    val_args.add("--in", raw_out.path)
+    val_args.add("--out", val_out.path)
+    val_args.add("--sha-out", sha_out.path)
+    val_args.add("--schema", ctx.attr.schema)
+    val_args.add("--min-examples", ctx.attr.min_examples)
+    ctx.actions.run(
+        executable = ctx.executable._validator,
+        inputs = [raw_out],
+        outputs = [val_out, sha_out],
+        arguments = [val_args],
+        mnemonic = "LoraCorpusValidate",
+        progress_message = "Validating corpus %s" % ctx.label,
+    )
+
+    return [
+        DefaultInfo(files = depset([val_out, sha_out])),
+        LoraDatasetInfo(
+            jsonl = val_out,
+            schema = ctx.attr.schema,
+            n_examples = -1,
+            sha = "",
+        ),
+    ]
+
+lora_corpus = rule(
+    implementation = _lora_corpus_impl,
+    attrs = {
+        "source": attr.label_list(
+            allow_files = True,
+            doc = "Raw source files fed to the transform as repeated --input flags.",
+        ),
+        "transform": attr.label(
+            mandatory = True,
+            executable = True,
+            cfg = "exec",
+            doc = (
+                "Binary that reads repeated `--input` / `--corpus-dep` " +
+                "flags and writes one SFT JSONL to `--output`."
+            ),
+        ),
+        "deps": attr.label_list(
+            providers = [LoraDatasetInfo],
+            doc = (
+                "Upstream `lora_corpus` or `lora_dataset` targets fed " +
+                "to the transform via repeated `--corpus-dep` flags."
+            ),
+        ),
+        "schema": attr.string(
+            default = "messages_v1",
+            values = ["messages_v1", "instruction_v1"],
+        ),
+        "min_examples": attr.int(default = 1),
+        "_validator": attr.label(
+            default = "@rules_lora//runtime/torchtune_runner:validate_jsonl",
+            executable = True,
+            cfg = "exec",
+        ),
+    },
+)
