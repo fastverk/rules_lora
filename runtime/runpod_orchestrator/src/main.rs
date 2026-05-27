@@ -313,11 +313,21 @@ set -euo pipefail
 echo "[lora-{name}] train: starting"
 
 MODEL_DIR="$(cat /tmp/lora-{name}.model_dir)"
-DATASET="$(find . -name '*.jsonl' -path '*lora_dataset*' -o -name 'dataset.jsonl' | head -1)"
+# Walk every .jsonl in the workdir, pick the first whose first line
+# is a `messages_v1` row (`{"messages": [...]}`). Robust to whatever
+# naming convention the consumer uses (sft.jsonl, dataset.jsonl,
+# parser_seed_dataset.jsonl, ...).
+DATASET=""
+while IFS= read -r f; do
+    head -c 12 "$f" 2>/dev/null | grep -q '"messages"' || continue
+    DATASET="$f"
+    break
+done < <(find . -type f -name '*.jsonl' -not -path '*/bazel-*' 2>/dev/null)
 if [[ -z "${{DATASET}}" ]]; then
-    echo "[lora-{name}] train: ERROR — no dataset JSONL found in workdir" >&2
+    echo "[lora-{name}] train: ERROR — no messages_v1 JSONL found in workdir" >&2
     exit 2
 fi
+echo "[lora-{name}] train: dataset = ${{DATASET}}"
 OUTPUT_DIR="$(pwd)/outputs/adapter-{name}"
 mkdir -p "${{OUTPUT_DIR}}"
 

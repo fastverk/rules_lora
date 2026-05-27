@@ -5,6 +5,20 @@ All notable changes to rules_lora. The format is loosely
 mirror the published bazel-registry entries (when we publish; for
 now this repo is premium / private).
 
+## 0.0.8 — Pod-side dataset auto-detect by content sniff
+
+v0.0.4–v0.0.7's pod-side `run` block tried to find the SFT JSONL via
+naming heuristic (`*lora_dataset*` or `dataset.jsonl`). That missed
+common conventions like `training/sft.jsonl` and meant consumers
+either renamed their seed file or wired in a bazel-bin path the
+workdir rsync doesn't see.
+
+The detector now walks every `.jsonl` in the workdir (skipping
+`bazel-*` dirs) and picks the first whose head bytes contain
+`"messages"` — i.e. a real `messages_v1` row. Robust to whatever
+the consumer named the file. Failure message also names the
+matched candidate count so debugging is one ssh away.
+
 ## 0.0.7 — Default RunPod image tag fix
 
 v0.0.4 pinned `runpod/pytorch:2.5.1-py3.11-cuda12.4.1-devel-ubuntu22.04`
