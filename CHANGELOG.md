@@ -5,6 +5,25 @@ All notable changes to rules_lora. The format is loosely
 mirror the published bazel-registry entries (when we publish; for
 now this repo is premium / private).
 
+## 0.0.20 — Local backend: install torch + unpin versions
+
+Two local-backend fixes uncovered by the agora smoke run:
+
+* Install `torch` explicitly in the venv (the previous pip install
+  list assumed torch was already present, as in the RunPod
+  pytorch image). Without it the MPS detection that runs `import
+  torch` always falls through to CPU.
+
+* Unpin `torchao` and `torchtune` versions for the local install.
+  v0.0.17's pin to `torchao==0.5.0` is not published for
+  aarch64-apple-darwin (`pip` returns 0.7.0 as the floor). Let pip
+  pick the latest matching set per platform; the RunPod image
+  still pins to torch 2.4-compatible versions in its own
+  `setup`.
+
+* Move device detection *after* the pip install so `import torch`
+  succeeds and MPS gets picked on Apple Silicon.
+
 ## 0.0.19 — `exec bash $RUNNER` (no +x needed)
 
 `exports_files` doesn't stamp the executable bit on shell scripts;

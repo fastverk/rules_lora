@@ -72,15 +72,6 @@ cd "${BUILD_WORKSPACE_DIRECTORY:-$(pwd)}"
 
 echo "[lora-${NAME}] local: cwd=$PWD adapter=${NAME} family=${FAMILY}"
 
-# ─── Device detection ─────────────────────────────────────────────
-DEVICE="cpu"
-if [[ "$(uname)" == "Darwin" ]] && python3 -c "import torch; assert torch.backends.mps.is_available()" 2>/dev/null; then
-    DEVICE="mps"
-elif command -v nvidia-smi >/dev/null 2>&1; then
-    DEVICE="cuda"
-fi
-echo "[lora-${NAME}] local: device=${DEVICE}"
-
 # ─── Python venv ──────────────────────────────────────────────────
 VENV=".venvs/lora-local"
 if [[ ! -d "$VENV" ]]; then
@@ -89,14 +80,27 @@ if [[ ! -d "$VENV" ]]; then
 fi
 source "$VENV/bin/activate"
 
-# Install once; subsequent runs skip via pip's cache + version check.
-echo "[lora-${NAME}] local: ensuring torchao + torchtune"
+# Install once; subsequent runs skip via pip's cache. Let pip pick
+# compatible torch / torchao / torchtune versions for the platform —
+# the pod backend pins to 2.4 (the image's torch); on macOS / Linux
+# locally pip picks the latest matching set.
+echo "[lora-${NAME}] local: ensuring torch + torchao + torchtune"
 pip install --quiet \
-    "torchao==0.5.0" \
-    "torchtune==0.3.1" \
+    torch \
+    torchao \
+    torchtune \
     "huggingface_hub[cli]" \
     transformers \
     datasets >&2
+
+# ─── Device detection (post-install so `import torch` works) ─────
+DEVICE="cpu"
+if [[ "$(uname)" == "Darwin" ]] && python3 -c "import torch; assert torch.backends.mps.is_available()" 2>/dev/null; then
+    DEVICE="mps"
+elif command -v nvidia-smi >/dev/null 2>&1; then
+    DEVICE="cuda"
+fi
+echo "[lora-${NAME}] local: device=${DEVICE}"
 
 # ─── Base model fetch ─────────────────────────────────────────────
 echo "[lora-${NAME}] local: pre-fetching ${BASE_ID}@${BASE_REV}"
