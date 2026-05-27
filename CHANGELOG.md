@@ -5,6 +5,14 @@ All notable changes to rules_lora. The format is loosely
 mirror the published bazel-registry entries (when we publish; for
 now this repo is premium / private).
 
+## 0.0.11 — Pin torchao + torchtune versions
+
+Latest torchao (0.13+) imports torch's `int1` dtype, which doesn't
+exist in torch 2.4 (the version in runpod/pytorch:2.4.0). Pin to
+`torchao==0.5.0` + `torchtune==0.3.1` — last release where both
+play nice with torch 2.4. Bumping the runpod image is a v0.0.12
+follow-up.
+
 ## 0.0.10 — Add `torchao` to pod-side setup
 
 torchtune now imports `torchao` unconditionally on package import.

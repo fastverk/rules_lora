@@ -295,9 +295,12 @@ echo "[lora-{name}] setup: installing torchtune + huggingface-cli"
 
 # RunPod's pytorch image ships python3 + pip + CUDA; we just add
 # torchtune and the HF hub client.
+# Pin torchao + torchtune to versions compatible with torch 2.4
+# (the version baked into runpod/pytorch:2.4.0). Bumping either
+# unpinned pulls a release expecting torch >= 2.11 (e.g. torch.int1).
 pip install --quiet --no-input \
-    torchtune \
-    torchao \
+    "torchao==0.5.0" \
+    "torchtune==0.3.1" \
     "huggingface_hub[cli]" \
     transformers \
     datasets
