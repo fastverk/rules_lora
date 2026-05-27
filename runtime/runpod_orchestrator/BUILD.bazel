@@ -1,0 +1,26 @@
+load("@rules_rust//rust:defs.bzl", "rust_binary")
+
+package(default_visibility = ["//visibility:public"])
+
+# v0.0.1: only the `write-jobspec` subcommand is functional —
+# called by the `lora_train` rule as `--_spec_writer`. The `run`
+# subcommand (remote upload + poll + download) lands in v0.1
+# alongside the runpod-cli lift from prime-transformer.
+rust_binary(
+    name = "runpod_orchestrator",
+    srcs = ["src/main.rs"],
+    edition = "2021",
+    deps = [
+        "@crates//:anyhow",
+        "@crates//:blake3",
+        "@crates//:clap",
+        "@crates//:serde_json",
+    ],
+)
+
+# Convenience alias matching the label the `lora_train` rule
+# defaults to.
+alias(
+    name = "write_jobspec",
+    actual = ":runpod_orchestrator",
+)

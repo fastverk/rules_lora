@@ -1,4 +1,11 @@
-# Bazel-native LoRA fine-tuning: typed SFT datasets, declarative recipes, runpod/local training backends, ExpertManifest emit
+# rules_lora — Bazel-native LoRA fine-tuning.
+#
+# Four public macros, one premium-tier private repo. See INTERNAL.md
+# for the design intent. Consumers are sibling fastverk repos
+# (rules_agentic_ide, agora, …) via `local_path_override` for now;
+# if the premium tier moves to a private bazel-registry, the cluster
+# moves together.
+
 module(
     name = "rules_lora",
     version = "0.0.1",
@@ -7,6 +14,57 @@ module(
 bazel_dep(name = "platforms", version = "1.0.0")
 bazel_dep(name = "bazel_skylib", version = "1.8.2")
 
+# rules_python — needed for the torchtune runner py_binary and for
+# resolver / orchestrator pip deps. uv is the default builder.
+bazel_dep(name = "rules_python", version = "1.7.0")
+bazel_dep(name = "rules_uv", version = "0.7.3")
+
+# rules_rust — the runpod orchestrator + hf_resolver are Rust binaries.
+bazel_dep(name = "rules_rust", version = "0.70.0")
+
+# rules_proto — the LoRA contract (TrainingJobSpec, AdapterArtifact,
+# ExpertManifest envelope) is proto-defined so consumers in Rust,
+# Python, and Lean can speak the same schema.
+bazel_dep(name = "rules_proto", version = "7.1.0")
+bazel_dep(name = "protobuf", version = "33.4")
+
 # Dev-only.
 bazel_dep(name = "rules_shell", version = "0.6.1", dev_dependency = True)
 bazel_dep(name = "stardoc", version = "0.7.2", dev_dependency = True)
+
+# ─── Rust toolchain ────────────────────────────────────────────────
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(
+    edition = "2021",
+    versions = ["1.95.0"],
+)
+use_repo(rust, "rust_toolchains")
+register_toolchains("@rust_toolchains//:all")
+
+# Cargo crates resolved declaratively via `from_specs`. Kept minimal
+# at v0 — the runner ecosystem can expand without re-locking.
+# `isolate = True` so consumers' own `crates` universes don't collide.
+crate = use_extension(
+    "@rules_rust//crate_universe:extension.bzl",
+    "crate",
+    isolate = True,
+)
+crate.spec(package = "anyhow", version = "1.0")
+crate.spec(features = ["derive"], package = "clap", version = "4.5")
+crate.spec(features = ["derive"], package = "serde", version = "1.0")
+crate.spec(package = "serde_json", version = "1.0")
+crate.spec(package = "serde_yaml", version = "0.9")
+crate.spec(package = "prost", version = "0.13")
+crate.spec(package = "prost-build", version = "0.13")
+crate.spec(features = ["full"], package = "tokio", version = "1.42")
+crate.spec(
+    default_features = False,
+    features = ["json", "rustls-tls"],
+    package = "reqwest",
+    version = "0.12",
+)
+crate.spec(package = "blake3", version = "1.5")
+crate.spec(package = "tracing", version = "0.1")
+crate.spec(features = ["env-filter"], package = "tracing-subscriber", version = "0.3")
+crate.from_specs(name = "crates")
+use_repo(crate, "crates")

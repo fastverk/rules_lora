@@ -1,0 +1,11 @@
+load("@rules_proto//proto:defs.bzl", "proto_library")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["lora.proto"])
+
+proto_library(
+    name = "lora_v1_proto",
+    srcs = ["lora.proto"],
+    strip_import_prefix = "/proto",
+)

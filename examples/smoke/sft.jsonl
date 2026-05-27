@@ -1,0 +1,5 @@
+{"messages":[{"role":"user","content":"What is 2+2?"},{"role":"assistant","content":"4"}]}
+{"messages":[{"role":"user","content":"capital of France?"},{"role":"assistant","content":"Paris"}]}
+{"messages":[{"role":"user","content":"prime number after 7"},{"role":"assistant","content":"11"}]}
+{"messages":[{"role":"user","content":"how do you spell `vickrey`"},{"role":"assistant","content":"V-I-C-K-R-E-Y. Named after William Vickrey, 1996 Nobel laureate in economics."}]}
+{"messages":[{"role":"user","content":"What's a LoRA?"},{"role":"assistant","content":"Low-Rank Adaptation. A parameter-efficient fine-tuning technique that adds small rank-r adapter matrices to a frozen base model's attention layers."}]}

@@ -1,0 +1,23 @@
+load("@rules_python//python:defs.bzl", "py_binary")
+
+package(default_visibility = ["//visibility:public"])
+
+# Build-time validators / renderers. No heavy deps; standard library
+# only. Heavy stuff (torch, torchtune) lives in the *training*
+# entrypoint that runs inside the runpod container, not here.
+
+py_binary(
+    name = "validate_jsonl",
+    srcs = ["validate_jsonl.py"],
+    main = "validate_jsonl.py",
+)
+
+py_binary(
+    name = "render_recipe",
+    srcs = ["render_recipe.py"],
+    main = "render_recipe.py",
+)
+
+# Future: the in-container entrypoint (torchtune launch + adapter
+# upload) goes here under a `runpod_entrypoint` py_binary that the
+# runpod container's command resolves at job-start time.

@@ -1,0 +1,56 @@
+// rules_lora wire schema. The provider-level contract is
+// Starlark; this proto is the durable on-disk artifact format that
+// every backend writes and that the ExpertManifest emit step
+// consumes.
+//
+// Cross-repo compatibility note: TrainingArtifact below is a
+// superset of `agentic_ide.v1.Expert` (in
+// rules_agentic_ide/proto/agentic_ide/v1/experts.proto). The
+// expert_manifest macro in this repo projects N TrainingArtifacts
+// down to an `agentic_ide.v1.ExpertManifest.binpb` (or a
+// future agora.v1 equivalent). One contract, two consumers.
+syntax = "proto3";
+
+package lora.v1;
+
+// What a backend was asked to do.
+message TrainingJobSpec {
+  // Stable name (the `lora_train` target name).
+  string name = 1;
+  // BLAKE3 hex of the rendered recipe YAML; pins the recipe.
+  string recipe_sha = 2;
+  // BLAKE3 hex of the validated dataset JSONL; pins the dataset.
+  string dataset_sha = 3;
+  // HF hub repo id + commit. The runner pulls and verifies.
+  string base_model_id = 4;
+  string base_model_revision = 5;
+  // Backend tag — `local`, `runpod`, `modal`, …
+  string backend = 6;
+  // YAML body — the runner doesn't reparse, just hands to the
+  // framework. Kept inline so the job spec is self-contained.
+  string recipe_yaml = 7;
+  // Per-backend opaque blob (RunPod pod-type, modal app id, …).
+  string backend_config_json = 8;
+  // Wall-clock budget. 0 = no limit.
+  uint32 max_minutes = 9;
+}
+
+// What a backend produced.
+message TrainingArtifact {
+  // Provenance — what was trained.
+  TrainingJobSpec spec = 1;
+  // Adapter weights, as bytes or as a URI to the staged file.
+  oneof payload {
+    bytes safetensors_inline = 2;
+    string safetensors_uri = 3;  // file:// or s3:// or hf://
+  }
+  // adapter_config.json (peft-compatible).
+  string adapter_config_json = 4;
+  // Final metrics.
+  float val_loss = 5;
+  float val_perplexity = 6;
+  uint32 train_steps = 7;
+  uint64 train_seconds = 8;
+  // BLAKE3 hex of the safetensors bytes — pins the artifact.
+  string adapter_sha = 9;
+}
