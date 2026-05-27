@@ -105,8 +105,8 @@ echo "[lora-${NAME}] local: ensuring torch + torchao + torchtune"
 #   - torch — let pip pick the latest matching install.
 pip install --quiet \
     torch \
-    "torchao==0.7.0" \
-    "torchtune==0.5.0" \
+    "torchao==0.5.0" \
+    "torchtune==0.4.0" \
     "kagglehub<0.3" \
     "huggingface_hub[cli]" \
     transformers \

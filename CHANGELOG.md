@@ -5,6 +5,17 @@ All notable changes to rules_lora. The format is loosely
 mirror the published bazel-registry entries (when we publish; for
 now this repo is premium / private).
 
+## 0.0.23 — Pin torchtune to 0.4.0 (torch.cpu.memory_stats fix)
+
+torchtune 0.5.0's `get_memory_stats` calls
+`torch.cpu.memory_stats()`, which doesn't exist (only `torch.cuda`
++ `torch.mps` have it). The call is unconditional even after
+`log_peak_memory_stats=False`. torchtune 0.4.0 (with torchao 0.5.0)
+doesn't hit this code path and runs cleanly on Apple Silicon MPS.
+
+Verified end-to-end: `tune run` starts on the agora parser smoke
+without import-time or device-detection errors.
+
 ## 0.0.22 — Pin local-backend deps to a known-good triangle
 
 The torchtune / torchao / kagglehub / kagglesdk dep graph breaks
