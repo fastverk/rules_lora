@@ -5,6 +5,20 @@ All notable changes to rules_lora. The format is loosely
 mirror the published bazel-registry entries (when we publish; for
 now this repo is premium / private).
 
+## 0.0.29 — Detached training (rules_runpod 0.0.6)
+
+Synthesized runpod manifest now sets `detached = true` +
+`poll_secs = 30`, so the long-pole `run` script (the actual
+`tune run`) executes detached on the pod and is polled for
+completion rather than streamed over a tethered SSH session.
+
+Three consecutive ~1hr agora parser fine-tunes died to mid-run
+SSH `Connection reset by peer`. Training was converging each
+time; the SSH session was the failure point. rules_runpod 0.0.6
+adds the detached-execution primitives; this release opts the
+training manifest into them. Bumps the rules_runpod dep 0.0.5 →
+0.0.6.
+
 ## 0.0.28 — Wandb integration (runpod backend)
 
 Opt-in W&B tracking on `lora_train(backend="runpod")`. Pattern

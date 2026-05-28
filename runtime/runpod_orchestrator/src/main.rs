@@ -363,6 +363,13 @@ workdir = "."
 # `["adapter-{name}"]` — the rsync pull then looked at the wrong
 # path on the pod and silently dropped the adapter.
 outputs = ["outputs/adapter-{name}"]{forward_envs}
+# Detached execution (rules_runpod 0.0.6+): the `run` script is
+# launched under setsid on the pod and polled for completion, so a
+# mid-training SSH drop no longer kills the run. Training jobs are
+# long (hour+) and previously died to `Connection reset by peer` on
+# the tethered session; detached is the correct default for them.
+detached = true
+poll_secs = 30
 
 setup = """
 set -euo pipefail
