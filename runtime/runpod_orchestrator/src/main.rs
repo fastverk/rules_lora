@@ -434,6 +434,27 @@ fi
     } else {
         (a.dataset_src.clone(), String::new(), String::new(), String::new())
     };
+    // Output retrieval. Volume mode is rsync-free: the adapter is written
+    // to the mounted volume, tarred into a single key, and `train` pulls
+    // that key via S3 (single-object GET — RunPod's S3 list is unusable).
+    let mount = a.volume_mount.trim_end_matches('/');
+    let (output_dir_expr, tar_block, output_archive_block) = if !vol.is_empty() {
+        let archive_key = format!("outputs/adapter-{}.tar.gz", a.name);
+        let archive_path = format!("{}/{}", mount, archive_key);
+        let output_dir = format!("{}/outputs/adapter-{}", mount, a.name);
+        let tar = format!(
+            "\necho \"[lora-{name}] train: archiving adapter → {archive}\"\n\
+             tar czf {archive} -C {mount}/outputs adapter-{name}",
+            name = a.name,
+            archive = archive_path,
+            mount = mount,
+        );
+        let archive_block =
+            format!("\noutput_archive = {{ key = \"{archive_key}\", local = \"{archive_key}\" }}");
+        (output_dir, tar, archive_block)
+    } else {
+        (format!("$(pwd)/outputs/adapter-{}", a.name), String::new(), String::new())
+    };
     // Top-level keys (name, setup, run) come *before* the `[resources]`
     // table — otherwise TOML parses them as members of that table and
     // runpod-cli's Manifest struct rejects the manifest with
@@ -445,7 +466,7 @@ workdir = "."
 # to ($(pwd)/outputs/adapter-{name}/). v0.0.23 had this as
 # `["adapter-{name}"]` — the rsync pull then looked at the wrong
 # path on the pod and silently dropped the adapter.
-outputs = ["outputs/adapter-{name}"]{forward_envs}{skip_block}{stage_block}
+outputs = ["outputs/adapter-{name}"]{forward_envs}{skip_block}{stage_block}{output_archive_block}
 # Detached execution (rules_runpod 0.0.6+): the `run` script is
 # launched under setsid on the pod and polled for completion, so a
 # mid-training SSH drop no longer kills the run. Training jobs are
@@ -501,7 +522,7 @@ if (( DATASET_ROWS == 0 )); then
     echo "[lora-{name}] train: ERROR — dataset is empty" >&2
     exit 2
 fi
-OUTPUT_DIR="$(pwd)/outputs/adapter-{name}"
+OUTPUT_DIR="{output_dir_expr}"
 mkdir -p "${{OUTPUT_DIR}}"
 
 # Synthesize a complete torchtune config by injecting the per-job
@@ -587,7 +608,7 @@ head -1 "${{DATASET}}" | head -c 200 >&2
 echo >&2
 echo "[lora-{name}] train: invoking tune run"
 tune run lora_finetune_single_device --config /tmp/lora-{name}.yaml
-echo "[lora-{name}] train: complete; outputs at ${{OUTPUT_DIR}}"
+echo "[lora-{name}] train: complete; outputs at ${{OUTPUT_DIR}}"{tar_block}
 """
 
 [resources]
@@ -601,6 +622,9 @@ cloud_type = "{cloud_type}"{volume_block}
         skip_block = skip_block,
         stage_block = stage_block,
         volume_block = volume_block,
+        output_dir_expr = output_dir_expr,
+        tar_block = tar_block,
+        output_archive_block = output_archive_block,
         forward_envs = forward_envs,
         wandb_pip = wandb_pip,
         wandb_login = wandb_login,
