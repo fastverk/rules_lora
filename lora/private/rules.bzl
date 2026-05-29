@@ -409,7 +409,7 @@ def _lora_runpod_manifest_synth_impl(ctx):
         mnemonic = "LoraRunpodManifestSynth",
         progress_message = "Synthesizing runpod manifest for %s" % ctx.label,
     )
-    return [DefaultInfo(files = depset([out, dataset_jsonl]))]
+    return [DefaultInfo(files = depset([out]))]
 
 lora_runpod_manifest_synth = rule(
     implementation = _lora_runpod_manifest_synth_impl,

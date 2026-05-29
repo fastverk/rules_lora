@@ -5,6 +5,15 @@ All notable changes to rules_lora. The format is loosely
 mirror the published bazel-registry entries (when we publish; for
 now this repo is premium / private).
 
+## 0.0.33 — Fix single-file violation in synth manifest
+
+- **`lora_runpod_manifest_synth` returned two files in `DefaultInfo`**
+  (`depset([out, dataset_jsonl])`), which violated the `runpod_manifest`
+  `src` `allow_single_file` contract — every volume-path `.run` target
+  failed at analysis with "must produce a single file." The dataset only
+  needs to be an *action input* (so it builds to bazel-bin for staging);
+  it must not be in `DefaultInfo`. Now returns `depset([out])`.
+
 ## 0.0.32 — Network-volume data path for runpod training
 
 - **`lora_train` gains `data_volume` / `data_center`.** When set, the
