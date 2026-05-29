@@ -110,6 +110,24 @@ enum Cmd {
         /// and swaps torchtune's StdoutLogger for WandBLogger.
         #[arg(long, default_value = "")]
         wandb_project: String,
+        /// Optional RunPod network volume id. When set, the manifest
+        /// mounts the volume and reads the dataset from it instead of
+        /// the rsync'd workdir — the fast data path that also delivers
+        /// genrule-built datasets (which `bazel-*` rsync excludes drop).
+        #[arg(long, default_value = "")]
+        network_volume_id: String,
+        /// RunPod data center of the volume (e.g. EU-RO-1). Required
+        /// when `network_volume_id` is set — the pod must be there.
+        #[arg(long, default_value = "")]
+        data_center: String,
+        /// Path where the network volume mounts on the pod.
+        #[arg(long, default_value = "/workspace")]
+        volume_mount: String,
+        /// Run-time-resolvable local path to the dataset JSONL to stage
+        /// onto the volume before deploy (e.g. `bazel-bin/<short_path>`).
+        /// Empty = assume the dataset is already on the volume.
+        #[arg(long, default_value = "")]
+        stage_local: String,
         /// Destination path for the manifest TOML.
         #[arg(long)]
         out: PathBuf,
@@ -151,11 +169,19 @@ fn main() -> Result<()> {
             grad_accum_steps,
             epochs,
             wandb_project,
+            network_volume_id,
+            data_center,
+            volume_mount,
+            stage_local,
             out,
         } => write_runpod_manifest(WriteRunpodManifestArgs {
             name,
             dataset_src,
             wandb_project,
+            network_volume_id,
+            data_center,
+            volume_mount,
+            stage_local,
             gpu_type,
             image,
             base_id,
@@ -253,6 +279,12 @@ struct WriteRunpodManifestArgs {
     /// `StdoutLogger` for `WandBLogger` with this project name.
     /// Empty string = no wandb (StdoutLogger only).
     wandb_project: String,
+    /// Network volume id to mount + read the dataset from. Empty =
+    /// legacy workdir-rsync path.
+    network_volume_id: String,
+    data_center: String,
+    volume_mount: String,
+    stage_local: String,
     out: PathBuf,
 }
 
@@ -367,6 +399,41 @@ fi
     } else {
         "  _component_: torchtune.training.metric_logging.StdoutLogger".to_string()
     };
+    // Network-volume data path. When a volume is configured, the dataset
+    // lives on the mounted volume (read at `{mount}/datasets/{name}/<file>`)
+    // rather than in the rsync'd workdir, and the heavy `training/full`
+    // corpus is excluded from the workdir rsync. An optional `stage` entry
+    // uploads the dataset to the volume via S3 before deploy. Top-level
+    // keys must precede `[resources]`.
+    let vol = a.network_volume_id.trim();
+    let (dataset_path, stage_block, volume_block, skip_block) = if !vol.is_empty() {
+        let key = format!("datasets/{}", a.name);
+        let basename_src = if a.stage_local.is_empty() { &a.dataset_src } else { &a.stage_local };
+        let basename = std::path::Path::new(basename_src)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("dataset.jsonl");
+        let dataset_path =
+            format!("{}/{}/{}", a.volume_mount.trim_end_matches('/'), key, basename);
+        let stage_block = if a.stage_local.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "\nstage = [{{ local = \"{}\", key = \"{}\" }}]",
+                a.stage_local, key
+            )
+        };
+        let mut vb = format!("\nnetwork_volume_id = \"{vol}\"");
+        if !a.data_center.trim().is_empty() {
+            vb.push_str(&format!("\ndata_center_id = \"{}\"", a.data_center.trim()));
+        }
+        // Drop the 922 MB private-transcript corpus from the workdir rsync;
+        // the dataset is on the volume now, so the workdir only needs code.
+        let skip_block = "\nskip_patterns = [\"training/full\"]".to_string();
+        (dataset_path, stage_block, vb, skip_block)
+    } else {
+        (a.dataset_src.clone(), String::new(), String::new(), String::new())
+    };
     // Top-level keys (name, setup, run) come *before* the `[resources]`
     // table — otherwise TOML parses them as members of that table and
     // runpod-cli's Manifest struct rejects the manifest with
@@ -378,7 +445,7 @@ workdir = "."
 # to ($(pwd)/outputs/adapter-{name}/). v0.0.23 had this as
 # `["adapter-{name}"]` — the rsync pull then looked at the wrong
 # path on the pod and silently dropped the adapter.
-outputs = ["outputs/adapter-{name}"]{forward_envs}
+outputs = ["outputs/adapter-{name}"]{forward_envs}{skip_block}{stage_block}
 # Detached execution (rules_runpod 0.0.6+): the `run` script is
 # launched under setsid on the pod and polled for completion, so a
 # mid-training SSH drop no longer kills the run. Training jobs are
@@ -421,10 +488,10 @@ MODEL_DIR="$(cat /tmp/lora-{name}.model_dir)"
 # none) when the workspace had multiple — torchtune then ran for
 # 0 batches and saved an empty adapter. The explicit path is the
 # only correct semantics.
-DATASET="{dataset_src}"
+DATASET="{dataset_path}"
 if [[ ! -f "${{DATASET}}" ]]; then
     echo "[lora-{name}] train: ERROR — dataset not present at ${{DATASET}}" >&2
-    echo "[lora-{name}] train:   (was the workdir rsync'd? what is at $(pwd)?)" >&2
+    echo "[lora-{name}] train:   (workdir rsync'd? volume mounted at {volume_mount}? $(pwd)?)" >&2
     pwd >&2; ls -la >&2
     exit 2
 fi
@@ -526,10 +593,14 @@ echo "[lora-{name}] train: complete; outputs at ${{OUTPUT_DIR}}"
 [resources]
 gpu_type = {gpu_type}
 image = "{image}"
-cloud_type = "{cloud_type}"
+cloud_type = "{cloud_type}"{volume_block}
 "#,
         name = a.name,
-        dataset_src = a.dataset_src,
+        dataset_path = dataset_path,
+        volume_mount = a.volume_mount,
+        skip_block = skip_block,
+        stage_block = stage_block,
+        volume_block = volume_block,
         forward_envs = forward_envs,
         wandb_pip = wandb_pip,
         wandb_login = wandb_login,

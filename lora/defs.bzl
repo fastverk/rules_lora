@@ -56,6 +56,13 @@ def lora_train(
         runpod_gpu = None,
         runpod_image = None,
         runpod_cloud = "SECURE",
+        # Optional RunPod network volume. When `data_volume` is set, the
+        # dataset is staged to the volume via S3 and read from the mount
+        # instead of the slow SSH workdir rsync (which also drops
+        # genrule-built datasets). `data_center` must match the volume's
+        # data center (e.g. "EU-RO-1") — the pod is placed there.
+        data_volume = "",
+        data_center = "",
         # Empty = no wandb. Set to the W&B project name (e.g.
         # "agora", "rules_agentic_ide") to enable W&B tracking
         # for backend = "runpod" runs. The pod will pip-install
@@ -159,6 +166,8 @@ def lora_train(
         image = image,
         cloud_type = runpod_cloud,
         wandb_project = wandb_project,
+        network_volume_id = data_volume,
+        data_center = data_center,
         visibility = ["//visibility:private"],
     )
 

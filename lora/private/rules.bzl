@@ -366,11 +366,20 @@ def _lora_runpod_manifest_synth_impl(ctx):
     # `DATASET=<path>` into the run script (replaces the v0.0.23
     # `find`-based discovery that silently failed).
     dataset_src_path = ctx.attr.dataset[LoraDatasetInfo].source_path
+    dataset_jsonl = ctx.attr.dataset[LoraDatasetInfo].jsonl
 
     args = ctx.actions.args()
     args.add("write-runpod-manifest")
     args.add("--name", ctx.attr.adapter_name)
     args.add("--dataset-src", dataset_src_path)
+    # Network-volume data path (optional). When a volume is set the
+    # manifest mounts it and reads the dataset from it; we stage the
+    # validated JSONL from its run-time bazel-bin location via S3.
+    if ctx.attr.network_volume_id:
+        args.add("--network-volume-id", ctx.attr.network_volume_id)
+        args.add("--data-center", ctx.attr.data_center)
+        args.add("--volume-mount", ctx.attr.volume_mount)
+        args.add("--stage-local", "bazel-bin/" + dataset_jsonl.short_path)
     # `before_each` repeats the flag per value (`--gpu-type A --gpu-type B`),
     # matching the orchestrator's clap `Vec<String>`. Plain
     # `add_all("--gpu-type", …)` would emit the flag once + bare values.
@@ -390,14 +399,17 @@ def _lora_runpod_manifest_synth_impl(ctx):
     args.add("--wandb-project", ctx.attr.wandb_project)
     args.add("--out", out.path)
 
+    # Depend on the validated JSONL so `bazel run`-ing the job builds it
+    # to bazel-bin, where the manifest's `stage` step uploads it from.
     ctx.actions.run(
         executable = ctx.executable._synth,
+        inputs = [dataset_jsonl],
         outputs = [out],
         arguments = [args],
         mnemonic = "LoraRunpodManifestSynth",
         progress_message = "Synthesizing runpod manifest for %s" % ctx.label,
     )
-    return [DefaultInfo(files = depset([out]))]
+    return [DefaultInfo(files = depset([out, dataset_jsonl]))]
 
 lora_runpod_manifest_synth = rule(
     implementation = _lora_runpod_manifest_synth_impl,
@@ -439,6 +451,13 @@ lora_runpod_manifest_synth = rule(
         # setup pip-installs wandb + `wandb login`s, and the
         # rendered torchtune metric_logger becomes WandBLogger.
         "wandb_project": attr.string(default = ""),
+        # Optional network-volume data path. When `network_volume_id`
+        # is set, the manifest mounts the volume, stages the dataset to
+        # it via S3, reads the dataset from the mount, and drops the
+        # heavy `training/full` corpus from the workdir rsync.
+        "network_volume_id": attr.string(default = ""),
+        "data_center": attr.string(default = ""),
+        "volume_mount": attr.string(default = "/workspace"),
         "_synth": attr.label(
             default = "@rules_lora//runtime/runpod_orchestrator:runpod_orchestrator",
             executable = True,
