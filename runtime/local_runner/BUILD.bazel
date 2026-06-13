@@ -1,3 +1,7 @@
 package(default_visibility = ["//visibility:public"])
 
-exports_files(["local_runner.sh"])
+# local_train.py is the local-backend training entry point. The //lora:defs.bzl
+# macro instantiates a per-target `<name>_local` py_binary with this as `srcs`
+# (+ the generated config / dataset in runfiles), so it is exported, not built
+# into a single py_binary here.
+exports_files(["local_train.py"])

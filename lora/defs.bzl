@@ -27,8 +27,8 @@ providers from `//lora/private:providers.bzl`.
 """
 
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@rules_python//python:defs.bzl", "py_binary")
 load("@rules_runpod//runpod:defs.bzl", "runpod_job", "runpod_manifest")
-load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 load(
     "//lora/private:aspects.bzl",
     _lora_lineage = "lora_lineage",
@@ -39,7 +39,7 @@ load(
     _lora_base_model = "lora_base_model",
     _lora_corpus = "lora_corpus",
     _lora_dataset = "lora_dataset",
-    _lora_local_runner_rule = "lora_local_runner",
+    _lora_local_config_rule = "lora_local_config",
     _lora_merge_rule = "lora_merge",
     _lora_recipe = "lora_recipe",
     _lora_runpod_manifest_synth = "lora_runpod_manifest_synth",
@@ -130,23 +130,26 @@ def lora_train(
     )
 
     # ---- local backend run entry -------------------------------------------
-    _lora_local_runner_rule(
-        name = name + "_local_runner_script",
+    # The runner is a py_binary (runtime/local_runner:local_train) reading a
+    # build-generated JSON config — no generated shell, no local_runner.sh.
+    _lora_local_config_rule(
+        name = name + "_local_config",
         adapter_name = name,
         recipe = recipe,
         dataset = dataset,
         base = base,
         visibility = ["//visibility:private"],
     )
-    sh_binary(
+    py_binary(
         name = name + "_local",
-        srcs = [":" + name + "_local_runner_script"],
+        srcs = ["@rules_lora//runtime/local_runner:local_train.py"],
+        main = "local_train.py",
+        args = ["--config", "$(rlocationpath :" + name + "_local_config)"],
         data = [
-            recipe,
+            ":" + name + "_local_config",
             dataset,
-            "@rules_lora//runtime/local_runner:local_runner.sh",
         ],
-        deps = ["@bazel_tools//tools/bash/runfiles"],
+        deps = ["@rules_python//python/runfiles"],
         visibility = visibility,
     )
 
@@ -209,20 +212,21 @@ def lora_train(
     # ---- modal backend run entry (stub) ------------------------------------
     write_file(
         name = name + "_modal_stub",
-        out = name + "_modal_stub.sh",
+        out = name + "_modal_stub.py",
         content = [
-            "#!/usr/bin/env bash",
-            "echo 'lora_train: the modal backend is not yet implemented.' >&2",
-            "echo 'Select a working backend with' >&2",
-            "echo '  --platforms=@rules_lora//lora/backend:local_platform' >&2",
-            "echo '  --platforms=@rules_lora//lora/backend:runpod_platform' >&2",
-            "exit 1",
+            "import sys",
+            "sys.exit(",
+            "    'lora_train: the modal backend is not yet implemented.\\n'",
+            "    'Select a working backend with one of:\\n'",
+            "    '  --platforms=@rules_lora//lora/backend:local_platform\\n'",
+            "    '  --platforms=@rules_lora//lora/backend:runpod_platform'",
+            ")",
         ],
-        is_executable = True,
     )
-    sh_binary(
+    py_binary(
         name = name + "_modal",
         srcs = [":" + name + "_modal_stub"],
+        main = name + "_modal_stub.py",
         visibility = visibility,
     )
 
@@ -281,11 +285,25 @@ def lora_merge(
         private = private,
         visibility = visibility,
     )
-    sh_binary(
+
+    # The `.run` entry is a py_binary (runtime/lora_merge:merge_run) reading the
+    # build-generated <name>.merge.json + subprocessing the lora-merge rust
+    # binary — no generated shell.
+    py_binary(
         name = name + ".run",
-        srcs = [":" + name],
-        data = ["@rules_lora//runtime/lora_merge:lora-merge"],
-        deps = ["@bazel_tools//tools/bash/runfiles"],
+        srcs = ["@rules_lora//runtime/lora_merge:merge_run.py"],
+        main = "merge_run.py",
+        args = [
+            "--config",
+            "$(rlocationpath :" + name + ")",
+            "--merge-tool",
+            "$(rlocationpath @rules_lora//runtime/lora_merge:lora-merge)",
+        ],
+        data = [
+            ":" + name,
+            "@rules_lora//runtime/lora_merge:lora-merge",
+        ],
+        deps = ["@rules_python//python/runfiles"],
         visibility = visibility,
     )
 
