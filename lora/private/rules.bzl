@@ -1,15 +1,18 @@
 """rules_lora private rule implementations.
 
-The macros in //lora:defs.bzl are thin wrappers that pick a backend
-and instantiate these rules. Keeping the rule defs private lets us
-evolve the public surface without touching every consumer.
+The macros in //lora:defs.bzl are thin wrappers that instantiate these
+rules and wire the per-platform backend dispatch (see //lora/backend).
+Keeping the rule defs private lets us evolve the public surface without
+touching every consumer.
 """
 
-load(":providers.bzl",
-     "LoraAdapterInfo",
-     "LoraBaseModelInfo",
-     "LoraDatasetInfo",
-     "LoraRecipeInfo")
+load(
+    ":providers.bzl",
+    "LoraAdapterInfo",
+    "LoraBaseModelInfo",
+    "LoraDatasetInfo",
+    "LoraRecipeInfo",
+)
 
 # ============================================================
 # lora_dataset — validate + sha-pin a JSONL.
@@ -41,7 +44,7 @@ def _lora_dataset_impl(ctx):
             # sidecar; build-time consumers read it via a separate
             # action when they need the actual values.
             n_examples = -1,  # placeholder — real value in the sidecar
-            sha = "",         # placeholder — real value in the sidecar
+            sha = "",  # placeholder — real value in the sidecar
         ),
     ]
 
@@ -158,15 +161,21 @@ lora_base_model = rule(
 )
 
 # ============================================================
-# lora_train — orchestrate a training run.
+# lora_train — compose the typed job spec.
 # ============================================================
 #
-# `bazel run :<name>.train` (the wrapper macro emits a `_train`
-# executable target). The rule itself produces the adapter file as
-# a build output if the backend supports declarative outputs (local
-# CPU smoke). For remote backends (runpod), the build produces a
-# job-spec file and the executable does the run + download.
+# The rule emits `<name>.jobspec.json` (the typed lora.v1.TrainingJobSpec),
+# tagged with the backend resolved from the toolchain. The runnable entry
+# (`<name>.run`) is wired by the //lora:defs.bzl macro and dispatched
+# per-platform via select(); see there.
+#
+# The backend is resolved per-platform from this toolchain type (see
+# //lora/backend), not from a per-target attribute. The spec writer + backend
+# identity both come from the resolved LoraBackendInfo.
+_BACKEND_TOOLCHAIN_TYPE = "@rules_lora//lora/backend:toolchain_type"
+
 def _lora_train_impl(ctx):
+    backend = ctx.toolchains[_BACKEND_TOOLCHAIN_TYPE].lora_backend
     spec = ctx.actions.declare_file(ctx.label.name + ".jobspec.json")
     args = ctx.actions.args()
     args.add("write-jobspec")
@@ -175,10 +184,10 @@ def _lora_train_impl(ctx):
     args.add("--dataset", ctx.attr.dataset[LoraDatasetInfo].jsonl.path)
     args.add("--base-id", ctx.attr.base[LoraBaseModelInfo].id)
     args.add("--base-revision", ctx.attr.base[LoraBaseModelInfo].revision)
-    args.add("--backend", ctx.attr.backend)
+    args.add("--backend", backend.name)
     args.add("--out", spec.path)
     ctx.actions.run(
-        executable = ctx.executable._spec_writer,
+        executable = backend.spec_writer,
         inputs = [
             ctx.attr.recipe[LoraRecipeInfo].yaml,
             ctx.attr.dataset[LoraDatasetInfo].jsonl,
@@ -186,7 +195,7 @@ def _lora_train_impl(ctx):
         outputs = [spec],
         arguments = [args],
         mnemonic = "LoraJobSpec",
-        progress_message = "Composing LoRA job spec for %s" % ctx.label,
+        progress_message = "Composing LoRA job spec (%s) for %s" % (backend.name, ctx.label),
     )
     return [
         DefaultInfo(files = depset([spec])),
@@ -207,16 +216,8 @@ lora_train = rule(
             mandatory = True,
             providers = [LoraDatasetInfo],
         ),
-        "backend": attr.string(
-            default = "runpod",
-            values = ["local", "runpod", "modal"],
-        ),
-        "_spec_writer": attr.label(
-            default = "@rules_lora//runtime/runpod_orchestrator:write_jobspec",
-            executable = True,
-            cfg = "exec",
-        ),
     },
+    toolchains = [_BACKEND_TOOLCHAIN_TYPE],
 )
 
 # ============================================================
@@ -475,6 +476,7 @@ def _lora_runpod_manifest_synth_impl(ctx):
     out = ctx.actions.declare_file(ctx.label.name + ".toml")
     recipe = ctx.attr.recipe[LoraRecipeInfo]
     base = ctx.attr.base[LoraBaseModelInfo]
+
     # Workspace-relative path to the underlying source JSONL of the
     # `lora_dataset`. Used by the synth template to bake an explicit
     # `DATASET=<path>` into the run script (replaces the v0.0.23
@@ -486,6 +488,7 @@ def _lora_runpod_manifest_synth_impl(ctx):
     args.add("write-runpod-manifest")
     args.add("--name", ctx.attr.adapter_name)
     args.add("--dataset-src", dataset_src_path)
+
     # Network-volume data path (optional). When a volume is set the
     # manifest mounts it and reads the dataset from it; we stage the
     # validated JSONL from its run-time bazel-bin location via S3.
@@ -494,6 +497,7 @@ def _lora_runpod_manifest_synth_impl(ctx):
         args.add("--data-center", ctx.attr.data_center)
         args.add("--volume-mount", ctx.attr.volume_mount)
         args.add("--stage-local", "bazel-bin/" + dataset_jsonl.short_path)
+
     # `before_each` repeats the flag per value (`--gpu-type A --gpu-type B`),
     # matching the orchestrator's clap `Vec<String>`. Plain
     # `add_all("--gpu-type", …)` would emit the flag once + bare values.

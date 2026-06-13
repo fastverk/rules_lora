@@ -66,6 +66,27 @@ ExpertManifestInfo = provider(
     },
 )
 
+LoraBackendInfo = provider(
+    doc = (
+        "A training backend, resolved per-platform via the " +
+        "`@rules_lora//lora/backend:toolchain_type` toolchain. Selecting a " +
+        "backend is `--platforms=@rules_lora//lora/backend:{local,runpod,modal}_platform` " +
+        "(or a platform carrying the matching `:backend` constraint_value) — " +
+        "not a per-target attribute. `lora_train` resolves this to compose the " +
+        "jobspec with the backend's tools + identity; the per-backend `.run` " +
+        "entry is dispatched with the same constraint via `select()`."
+    ),
+    fields = {
+        "name": "str — backend id, one of {local, runpod, modal}.",
+        "spec_writer": (
+            "FilesToRunProvider — the jobspec composer (exec-cfg). Emits the " +
+            "typed `lora.v1.TrainingJobSpec` tagged with this backend."
+        ),
+        "default_image": "str — default container image (remote backends); \"\" for local.",
+        "default_gpu": "str — default GPU type (remote backends); \"\" for local.",
+    },
+)
+
 LoraLineageInfo = provider(
     doc = (
         "Transitive training provenance. Threaded up the " +

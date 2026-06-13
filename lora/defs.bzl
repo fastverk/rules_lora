@@ -58,8 +58,11 @@ lora_recipe = _lora_recipe
 lora_lineage = _lora_lineage
 lora_lineage_aspect = _lora_lineage_aspect
 
-# Default RunPod image + GPU. Used by `lora_train` when
-# `backend = "runpod"` and no explicit override is passed.
+# Default RunPod image + GPU for the runpod `.run` entry. These mirror the
+# runpod backend toolchain's `default_gpu`/`default_image` (//lora/backend);
+# they live here too because the runpod run entry is assembled at loading phase
+# (`@rules_runpod`'s `runpod_job` is a macro) where the resolved toolchain
+# isn't visible. The toolchain copy covers the build (jobspec) side.
 _DEFAULT_RUNPOD_GPU = "NVIDIA H100 80GB HBM3"
 _DEFAULT_RUNPOD_IMAGE = "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"
 
@@ -68,8 +71,7 @@ def lora_train(
         base,
         recipe,
         dataset,
-        backend = "runpod",
-        # RunPod-only knobs:
+        # RunPod knobs (configure the runpod `.run` entry):
         runpod_gpu = None,
         runpod_image = None,
         runpod_cloud = "SECURE",
@@ -81,35 +83,37 @@ def lora_train(
         data_volume = "",
         data_center = "",
         # Empty = no wandb. Set to the W&B project name (e.g.
-        # "agora", "rules_agentic_ide") to enable W&B tracking
-        # for backend = "runpod" runs. The pod will pip-install
-        # wandb, forward WANDB_API_KEY from the local env, log
-        # in, and torchtune's metric_logger becomes WandBLogger.
+        # "agora", "rules_agentic_ide") to enable W&B tracking for the
+        # runpod run. The pod will pip-install wandb, forward
+        # WANDB_API_KEY from the local env, log in, and torchtune's
+        # metric_logger becomes WandBLogger.
         wandb_project = "",
         visibility = None):
     """Declare a LoRA training run.
 
-    Always emits the typed `lora.v1.TrainingJobSpec` JSON
-    (`<name>.jobspec.json`). When `backend == "runpod"`, also
-    composes with `@rules_runpod` to produce:
+    The **backend is selected per-platform**, not per-target:
 
-      * `<name>_runpod_manifest_toml` — synthesized runpod TOML
-        (build action via `write_file`).
-      * `<name>_runpod_manifest` — typed manifest target.
-      * `<name>_runpod_job` — typed job spec + `bazel run`-able
-        `<name>_runpod_job.run` sibling.
+        bazel build :<name>                                  # default: runpod
+        bazel build :<name> --platforms=@rules_lora//lora/backend:local_platform
 
-    The synthesized manifest's `setup` installs torchtune and the
-    `run` block is a v0 placeholder; the real torchtune wiring
-    lands in rules_lora v0.0.3 (`runtime/torchtune_runner/` becomes
-    a runnable entrypoint that reads the jobspec).
+    `:<name>` (the rule) resolves `@rules_lora//lora/backend:toolchain_type` and
+    emits the typed `lora.v1.TrainingJobSpec` JSON (`<name>.jobspec.json`) tagged
+    with the resolved backend. The runnable `:<name>.run` dispatches on the same
+    `:backend` constraint via `select()`:
+
+      * local  -> `:<name>_local` (host venv + torchtune; runtime/local_runner)
+      * runpod -> `:<name>_runpod_job.run` (synthesized manifest + @rules_runpod)
+      * modal  -> `:<name>_modal` (stub; not yet implemented)
+
+    All three run entries are emitted regardless of platform (analysis-only for
+    the inactive ones); the `select()` picks the one matching the build, so the
+    run side and the toolchain-resolved build side agree on one platform choice.
 
     Args:
       name: target name.
       base: label to a `lora_base_model` target.
       recipe: label to a `lora_recipe` target.
       dataset: label to a `lora_dataset` target.
-      backend: one of "local" | "runpod" | "modal".
       runpod_gpu: override the default RunPod GPU type. Either a single
         type (string) or an ordered fallback list — the runpod-cli tries
         each in turn, advancing past capacity ("no instances available")
@@ -122,38 +126,34 @@ def lora_train(
         base = base,
         recipe = recipe,
         dataset = dataset,
-        backend = backend,
         visibility = visibility,
     )
 
-    if backend == "local":
-        _lora_local_runner_rule(
-            name = name + "_local_runner_script",
-            adapter_name = name,
-            recipe = recipe,
-            dataset = dataset,
-            base = base,
-            visibility = ["//visibility:private"],
-        )
-        sh_binary(
-            name = name + ".run",
-            srcs = [":" + name + "_local_runner_script"],
-            data = [
-                recipe,
-                dataset,
-                "@rules_lora//runtime/local_runner:local_runner.sh",
-            ],
-            deps = ["@bazel_tools//tools/bash/runfiles"],
-            visibility = visibility,
-        )
-        return
+    # ---- local backend run entry -------------------------------------------
+    _lora_local_runner_rule(
+        name = name + "_local_runner_script",
+        adapter_name = name,
+        recipe = recipe,
+        dataset = dataset,
+        base = base,
+        visibility = ["//visibility:private"],
+    )
+    sh_binary(
+        name = name + "_local",
+        srcs = [":" + name + "_local_runner_script"],
+        data = [
+            recipe,
+            dataset,
+            "@rules_lora//runtime/local_runner:local_runner.sh",
+        ],
+        deps = ["@bazel_tools//tools/bash/runfiles"],
+        visibility = visibility,
+    )
 
-    if backend != "runpod":
-        return
-
-    # `runpod_gpu` accepts a single GPU type (string) or an ordered
-    # fallback list. The list reaches the manifest as `gpu_type = [...]`;
-    # runpod-cli tries each in turn, advancing past capacity errors.
+    # ---- runpod backend run entry ------------------------------------------
+    # `runpod_gpu` accepts a single GPU type (string) or an ordered fallback
+    # list. The list reaches the manifest as `gpu_type = [...]`; runpod-cli
+    # tries each in turn, advancing past capacity errors.
     if runpod_gpu == None:
         gpus = [_DEFAULT_RUNPOD_GPU]
     elif type(runpod_gpu) == "string":
@@ -163,16 +163,12 @@ def lora_train(
     pod_type = gpus[0]  # primary — jobspec metadata; manifest carries the full list
     image = runpod_image or _DEFAULT_RUNPOD_IMAGE
 
-    # v0.0.4: the manifest TOML is synthesized by the Rust binary in
-    # //runtime/runpod_orchestrator. setup installs torchtune + the
-    # HF CLI and pre-fetches the base model; run renders an effective
-    # torchtune config from the rule's recipe attrs and invokes
-    # `tune run lora_finetune_single_device`. Replaces the v0.0.2
-    # `echo placeholder` and its `write_file` synth.
-    # 0.0.24: the manifest synth reads the dataset's source_path
-    # from LoraDatasetInfo to bake an explicit DATASET=<path> into
-    # the run script (replaces the v0.0.23 find-based discovery
-    # that silently failed when the workspace had multiple .jsonls).
+    # The manifest TOML is synthesized by the Rust binary in
+    # //runtime/runpod_orchestrator. setup installs torchtune + the HF CLI and
+    # pre-fetches the base model; run renders an effective torchtune config from
+    # the recipe attrs and invokes `tune run lora_finetune_single_device`. The
+    # synth reads the dataset's source_path from LoraDatasetInfo to bake an
+    # explicit DATASET=<path> into the run script.
     _lora_runpod_manifest_synth(
         name = name + "_runpod_manifest_toml",
         adapter_name = name,
@@ -187,30 +183,60 @@ def lora_train(
         data_center = data_center,
         visibility = ["//visibility:private"],
     )
-
     runpod_manifest(
         name = name + "_runpod_manifest",
         src = ":" + name + "_runpod_manifest_toml",
         workdir = ".",
-        # The synthesized run script writes to
-        # `$(pwd)/outputs/adapter-<name>` so the path runpod-cli's
-        # post-train rsync looks for matches it. v0.0.15 had this as
-        # `["adapter-<name>"]` which silently failed the pull.
+        # The synthesized run script writes to `$(pwd)/outputs/adapter-<name>`
+        # so the path runpod-cli's post-train rsync looks for matches it.
         outputs = ["outputs/adapter-" + name],
         visibility = visibility,
     )
-
     runpod_job(
         name = name + "_runpod_job",
         manifest = ":" + name + "_runpod_manifest",
         pod_type = pod_type,
         image = image,
-        # Single-shot training: tear down the pod on success or
-        # failure. Without this, every `bazel run` that errors mid-
-        # tune leaves an orphan A100 burning $1.20/hr until manually
-        # deleted. The adapter is pulled to outputs/ before the
-        # failure-terminate fires, so partial checkpoints come back.
+        # Single-shot training: tear down the pod on success or failure.
+        # Without this, every `bazel run` that errors mid-tune leaves an orphan
+        # A100 burning $1.20/hr until manually deleted. The adapter is pulled to
+        # outputs/ before the failure-terminate fires, so partial checkpoints
+        # come back.
         ephemeral = True,
+        visibility = visibility,
+    )
+
+    # ---- modal backend run entry (stub) ------------------------------------
+    write_file(
+        name = name + "_modal_stub",
+        out = name + "_modal_stub.sh",
+        content = [
+            "#!/usr/bin/env bash",
+            "echo 'lora_train: the modal backend is not yet implemented.' >&2",
+            "echo 'Select a working backend with' >&2",
+            "echo '  --platforms=@rules_lora//lora/backend:local_platform' >&2",
+            "echo '  --platforms=@rules_lora//lora/backend:runpod_platform' >&2",
+            "exit 1",
+        ],
+        is_executable = True,
+    )
+    sh_binary(
+        name = name + "_modal",
+        srcs = [":" + name + "_modal_stub"],
+        visibility = visibility,
+    )
+
+    # ---- per-platform dispatch ---------------------------------------------
+    # `:<name>.run` follows the build's `:backend` constraint to the matching
+    # run entry — the same constraint the rule's toolchain resolution keys on.
+    native.alias(
+        name = name + ".run",
+        actual = select({
+            "@rules_lora//lora/backend:local": ":" + name + "_local",
+            "@rules_lora//lora/backend:runpod": ":" + name + "_runpod_job.run",
+            "@rules_lora//lora/backend:modal": ":" + name + "_modal",
+            "//conditions:default": ":" + name + "_runpod_job.run",
+        }),
         visibility = visibility,
     )
 
