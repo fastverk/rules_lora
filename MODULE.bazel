@@ -38,8 +38,20 @@ local_path_override(
 bazel_dep(name = "rules_proto", version = "7.1.0")
 bazel_dep(name = "protobuf", version = "33.4")
 
+# Training backends are per-platform toolchains (see //lora/backend). runpod is
+# the unconstrained default; local/modal are gated on their :backend constraint
+# and selected with `--platforms=@rules_lora//lora/backend:{local,modal}_platform`. The
+# constrained backends register first so the default host platform falls through
+# to runpod.
+register_toolchains(
+    "@rules_lora//lora/backend:local_toolchain",
+    "@rules_lora//lora/backend:modal_toolchain",
+    "@rules_lora//lora/backend:runpod_toolchain",
+)
+
 # Dev-only.
 bazel_dep(name = "rules_shell", version = "0.6.1")
+
 bazel_dep(name = "stardoc", version = "0.7.2", dev_dependency = True)
 
 # ─── Rust toolchain ────────────────────────────────────────────────
@@ -49,6 +61,7 @@ rust.toolchain(
     versions = ["1.95.0"],
 )
 use_repo(rust, "rust_toolchains")
+
 register_toolchains("@rust_toolchains//:all")
 
 # Cargo crates resolved declaratively via `from_specs`. Kept minimal
@@ -59,33 +72,79 @@ crate = use_extension(
     "crate",
     isolate = True,
 )
-crate.spec(package = "anyhow", version = "1.0")
-crate.spec(features = ["derive"], package = "clap", version = "4.5")
-crate.spec(features = ["derive"], package = "serde", version = "1.0")
-crate.spec(package = "serde_json", version = "1.0")
-crate.spec(package = "serde_yaml", version = "0.9")
-crate.spec(package = "prost", version = "0.13")
-crate.spec(package = "prost-build", version = "0.13")
-crate.spec(features = ["full"], package = "tokio", version = "1.42")
+crate.spec(
+    package = "anyhow",
+    version = "1.0",
+)
+crate.spec(
+    features = ["derive"],
+    package = "clap",
+    version = "4.5",
+)
+crate.spec(
+    features = ["derive"],
+    package = "serde",
+    version = "1.0",
+)
+crate.spec(
+    package = "serde_json",
+    version = "1.0",
+)
+crate.spec(
+    package = "serde_yaml",
+    version = "0.9",
+)
+crate.spec(
+    package = "prost",
+    version = "0.13",
+)
+crate.spec(
+    package = "prost-build",
+    version = "0.13",
+)
+crate.spec(
+    features = ["full"],
+    package = "tokio",
+    version = "1.42",
+)
 crate.spec(
     default_features = False,
-    features = ["json", "rustls-tls"],
+    features = [
+        "json",
+        "rustls-tls",
+    ],
     package = "reqwest",
     version = "0.12",
 )
-crate.spec(package = "blake3", version = "1.5")
-crate.spec(package = "tracing", version = "0.1")
-crate.spec(features = ["env-filter"], package = "tracing-subscriber", version = "0.3")
+crate.spec(
+    package = "blake3",
+    version = "1.5",
+)
+crate.spec(
+    package = "tracing",
+    version = "0.1",
+)
+crate.spec(
+    features = ["env-filter"],
+    package = "tracing-subscriber",
+    version = "0.3",
+)
 
 # `lora_merge` (runtime/lora_merge): fold a trained LoRA adapter into its
 # base and export a standalone HF model dir. candle-core gives safetensors
 # load/save + a pickle reader for torchtune's `adapter_model.bin` + tensor
 # matmul/dtype; hf-hub downloads the base. CPU only — the merge is I/O bound,
 # so no `metal`/`cuda` feature (keeps the build portable across host OSes).
-crate.spec(package = "candle-core", version = "0.9")
+crate.spec(
+    package = "candle-core",
+    version = "0.9",
+)
 crate.spec(
     default_features = False,
-    features = ["ureq", "rustls-tls"],
+    features = [
+        "ureq",
+        "rustls-tls",
+    ],
     package = "hf-hub",
     version = "0.4",
 )

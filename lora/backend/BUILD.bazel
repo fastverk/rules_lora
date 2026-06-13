@@ -1,0 +1,113 @@
+"""LoRA training backends as per-platform toolchains.
+
+Pick a backend for a build with `--platforms`:
+
+    bazel build //...                                            # default: runpod
+    bazel build //... --platforms=@rules_lora//lora/backend:local_platform
+    bazel build //... --platforms=@rules_lora//lora/backend:modal_platform
+
+`lora_train` resolves `:toolchain_type` to compose the jobspec with the matching
+backend; the `.run` entry dispatches on the same `:backend` constraint via
+`select()`. LoRA's train/dataset/recipe deps are all exec-cfg tools, so a
+backend-only target platform is sufficient — no cpu/os dimension is needed.
+"""
+
+load("//lora/private:toolchains.bzl", "lora_backend_toolchain")
+
+package(default_visibility = ["//visibility:public"])
+
+toolchain_type(name = "toolchain_type")
+
+# The backend dimension. `select()` keys + `target_compatible_with` both use
+# these constraint_values directly.
+constraint_setting(name = "backend")
+
+constraint_value(
+    name = "local",
+    constraint_setting = ":backend",
+)
+
+constraint_value(
+    name = "runpod",
+    constraint_setting = ":backend",
+)
+
+constraint_value(
+    name = "modal",
+    constraint_setting = ":backend",
+)
+
+# Convenience target platforms — `--platforms=@rules_lora//lora/backend:<backend>_platform`.
+# They `parents` the host platform so they inherit its cpu/os: a backend
+# platform adds only the `:backend` dimension, leaving target-cfg artifacts
+# (e.g. the lora_merge rust_binary) able to resolve their host toolchains.
+# Cross-compiling? Define your own platform parenting your target instead.
+platform(
+    name = "local_platform",
+    constraint_values = [":local"],
+    parents = ["@platforms//host"],
+)
+
+platform(
+    name = "runpod_platform",
+    constraint_values = [":runpod"],
+    parents = ["@platforms//host"],
+)
+
+platform(
+    name = "modal_platform",
+    constraint_values = [":modal"],
+    parents = ["@platforms//host"],
+)
+
+# ----------------------------------------------------------------------------
+# Backend implementations. spec_writer is shared today (the jobspec composer is
+# backend-agnostic; it only tags the chosen backend). default_image/_gpu carry
+# the remote-backend defaults that used to live as constants in defs.bzl.
+# ----------------------------------------------------------------------------
+lora_backend_toolchain(
+    name = "runpod_backend",
+    backend_name = "runpod",
+    default_gpu = "NVIDIA H100 80GB HBM3",
+    default_image = "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04",
+    spec_writer = "//runtime/runpod_orchestrator:write_jobspec",
+)
+
+lora_backend_toolchain(
+    name = "local_backend",
+    backend_name = "local",
+    spec_writer = "//runtime/runpod_orchestrator:write_jobspec",
+)
+
+lora_backend_toolchain(
+    name = "modal_backend",
+    backend_name = "modal",
+    spec_writer = "//runtime/runpod_orchestrator:write_jobspec",
+)
+
+# ----------------------------------------------------------------------------
+# Registration (also `register_toolchains`-ed in MODULE.bazel). The constrained
+# backends are listed first; runpod is the unconstrained default fallback, so a
+# plain `bazel build` (host platform, no :backend constraint) resolves runpod,
+# and `--platforms=...:local` resolves local.
+# ----------------------------------------------------------------------------
+toolchain(
+    name = "local_toolchain",
+    target_compatible_with = [":local"],
+    toolchain = ":local_backend",
+    toolchain_type = ":toolchain_type",
+)
+
+toolchain(
+    name = "modal_toolchain",
+    target_compatible_with = [":modal"],
+    toolchain = ":modal_backend",
+    toolchain_type = ":toolchain_type",
+)
+
+toolchain(
+    name = "runpod_toolchain",
+    # No target_compatible_with — the default when no :backend constraint is set.
+    toolchain = ":runpod_backend",
+    toolchain_type = ":toolchain_type",
+)

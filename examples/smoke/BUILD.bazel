@@ -43,10 +43,11 @@ lora_base_model(
 
 lora_train(
     name = "smoke_jobspec",
-    backend = "runpod",
     base = ":tiny_base",
     dataset = ":tiny_sft",
     recipe = ":tiny_recipe",
+    # Backend is per-platform now: defaults to runpod; build with
+    # --platforms=@rules_lora//lora/backend:local_platform for the local path.
 )
 
 # Exercises the lora_merge macro (rule + .run wrapper). No execution
