@@ -22,8 +22,9 @@ The backend dispatch + de-shell work already landed (PR #1 on `main`):
   - `runtime/local_runner/local_train.py` is a thin orchestrator — it creates a
     runtime venv, `pip install`s torch/torchtune, downloads the HF model, and
     shells `tune run`. Network + host accelerator; not hermetic.
-  - `runtime/runpod_orchestrator/src/main.rs` — the `run` subcommand is a stub
-    (`bail!("not implemented yet (v0.1)")`); the working RunPod path is the
+  - `runtime/runpod_orchestrator/src/main.rs` does **build-time manifest synth
+    only** (`write-jobspec` + `write-runpod-manifest`); the dead `run` stub was
+    removed (it duplicated `@rules_runpod`). The working RunPod path is the
     `@rules_runpod` macro composition.
 
 ## Goal
@@ -68,6 +69,15 @@ Apple-Silicon box, confirm a real LoRA step trains end-to-end (device `mps`),
 adapter lands in `outputs/adapter-<name>`. Repeat on a CUDA Linux box for the
 `cu121` wheel set.
 
+**Baseline validated (2026-06, Apple-Silicon MPS):** the *current venv* local
+runner trains a real LoRA end-to-end (Qwen2.5-0.5B-Instruct, device `mps`,
+adapter written to `outputs/adapter-<name>`), and `lora_merge` then folds it
+into the base → a standalone, loadable HF dir (candle/CPU, 48 projections,
+scale α/r). So Track 1 (hermetic vendoring) is an **optimization of a working
+path, not a fix**. The size-mismatch builder bug found en route — the runner
+hardcoded the 1.5B builder for the whole qwen2 family — is fixed in **0.1.1**
+(size-aware `_model_builder`, deriving the builder from the parsed base size).
+
 ---
 
 ## Track 2 — RunPod backend: already implemented by `rules_runpod` (not a rewrite)
@@ -91,8 +101,9 @@ What's actually left for the runpod backend is small and optional:
   the REST calls — lifecycle stays in `rules_runpod`, the lora side just reads
   the jobspec and hands off. Wiring/ergonomics, not new capability; the
   venv-free win is marginal for runpod (the heavy work runs on the pod anyway).
-- Otherwise the `runpod_orchestrator run` stub can simply be **deleted** — it
-  advertises a capability `rules_runpod` already provides.
+- **Done:** the `runpod_orchestrator run` stub has been **deleted** — it
+  advertised a capability `rules_runpod` already provides. The orchestrator
+  binary now exposes only its two build-time synth subcommands.
 
 **Validation note (from a live key):** RunPod's GraphQL pod-creation is
 deprecated — read queries work, the create *mutation* 403s on a read-scoped key;

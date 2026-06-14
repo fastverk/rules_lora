@@ -24,8 +24,9 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Cmd {
-    /// Build-time: serialize the rule attrs into a TrainingJobSpec
-    /// JSON file. The execute-time `run` subcommand reads this.
+    /// Build-time: serialize the rule attrs into the typed
+    /// `lora.v1.TrainingJobSpec` JSON contract for the job (provenance +
+    /// backend identity).
     WriteJobspec {
         #[arg(long)]
         name: String,
@@ -132,12 +133,6 @@ enum Cmd {
         #[arg(long)]
         out: PathBuf,
     },
-    /// Execute-time: upload spec + dataset, poll the job, download
-    /// the adapter. Not yet implemented; v0.1.
-    Run {
-        #[arg(long)]
-        jobspec: PathBuf,
-    },
 }
 
 fn main() -> Result<()> {
@@ -197,13 +192,6 @@ fn main() -> Result<()> {
             epochs,
             out,
         }),
-        Cmd::Run { jobspec } => {
-            anyhow::bail!(
-                "runpod_orchestrator run: not implemented yet (v0.1). \
-                 v0.0 only emits the spec at {}.",
-                jobspec.display()
-            )
-        }
     }
 }
 
