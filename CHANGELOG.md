@@ -2,8 +2,28 @@
 
 All notable changes to rules_lora. The format is loosely
 [Keep a Changelog](https://keepachangelog.com/) — version headers
-mirror the published bazel-registry entries (when we publish; for
-now this repo is premium / private).
+mirror the published bazel-registry entries. This repo is public
+(`github.com/fastverk/rules_lora`).
+
+## 0.1.0 — per-platform backend toolchain (BREAKING) + lineage aspect + de-shell
+
+**Breaking:** `lora_train` no longer takes a `backend = "..."` attribute. The
+training backend (local / runpod / modal) is now a **per-platform toolchain** —
+select it with `--platforms=@rules_lora//lora/backend:{local,runpod,modal}_platform`
+(default: runpod). `lora_train` resolves the toolchain for the jobspec composer +
+backend identity; `:<name>.run` dispatches to the matching backend via `select()`.
+
+- **Per-platform backend toolchain** (`//lora/backend`): a `backend`
+  constraint_setting + local/runpod/modal constraint_values, the
+  `lora_backend_toolchain` rule + `LoraBackendInfo`, and convenience platforms
+  parented on `@platforms//host`.
+- **Lineage aspect**: `lora_lineage_aspect` (+ `LoraLineageInfo`) threads training
+  provenance up the dataset → recipe → base → train graph; `lora_lineage(target=…)`
+  emits a JSON manifest — no hand-maintained sha plumbing.
+- **De-shell**: the local + merge `.run` entries are now `py_binary` orchestrators
+  reading build-generated JSON configs; `local_runner.sh` + the generated bash
+  wrappers are gone. (Full hermetic torch vendoring + the orchestrator `run`
+  subcommand are a follow-up — see `docs/hermetic-runners-roadmap.md`.)
 
 ## 0.0.35 — Forward HF_TOKEN to the pod
 
