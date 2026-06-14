@@ -5,6 +5,20 @@ All notable changes to rules_lora. The format is loosely
 mirror the published bazel-registry entries. This repo is public
 (`github.com/fastverk/rules_lora`).
 
+## 0.1.1 — local runner: size-aware torchtune model builder
+
+Patch fix for the `local` backend. `local_train.py` hardcoded the
+`lora_qwen2_1_5b` model builder for the whole `qwen2` family, so any non-1.5B
+qwen2 base (Qwen2.5-0.5B/3B/7B) failed at checkpoint load with a tensor
+size mismatch (e.g. `norm.scale` 896 vs 1536 for 0.5B vs 1.5B). The LoRA
+builder depends on the base model's parameter *size*, not the family; the size
+is now derived from the parsed `base_id` (`Qwen2.5-0.5B` → `lora_qwen2_0_5b`).
+
+Validated on Apple-Silicon MPS end-to-end: the smoke LoRA now trains via the
+local runner (5 steps, a real PEFT adapter — `adapter_{0.pt,model.bin,config.json}`
+— written to `outputs/adapter-<name>`). Confirms the runtime venv + the pinned
+`torch`/`torchtune==0.4.0`/`torchao==0.5.0`/`kagglehub<0.3` set work on MPS.
+
 ## 0.1.0 — per-platform backend toolchain (BREAKING) + lineage aspect + de-shell
 
 **Breaking:** `lora_train` no longer takes a `backend = "..."` attribute. The
