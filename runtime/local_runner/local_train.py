@@ -67,20 +67,27 @@ def _model_builder(family, base_id):
         return "torchtune.models.mistral.lora_mistral"  # torchtune ships the 7B builder
     raise SystemExit("unknown family: %s" % family)
 
-# Known-good pin set for the Apple-Silicon-MPS path. The torchtune + torchao +
-# kagglehub triangle breaks in interesting ways on every unpinned release; this
-# set is the one observed working (see the former local_runner.sh notes):
-#   torchtune 0.4.0 has lora_qwen2_1_5b and skips int4_weight_only during MPS;
+# Fully-pinned known-good set for the Apple-Silicon-MPS path, verified
+# end-to-end (a real LoRA trained on MPS). torch / huggingface_hub /
+# transformers / datasets used to float, so a *fresh* venv drifted onto
+# whatever was latest — the exact breakage the runpod backend hit (latest
+# transformers wants a newer torch). These are the versions the validated venv
+# resolved. The fragile corners:
+#   torchtune 0.4.0 ships the size builders + skips int4_weight_only on MPS;
 #   torchao 0.5.0 still exports int4_weight_only (the name torchtune references);
-#   kagglehub<0.3 avoids the kagglesdk get_web_endpoint import break.
+#   kagglehub 0.2.9 avoids the kagglesdk get_web_endpoint import break.
+# This is the *MPS regime* (latest torch). The runpod backend pins a different,
+# torch-2.4 set matched to its base image (see runpod_orchestrator's setup) —
+# the two can't share one set because the torch versions differ. Bumping either
+# is a deliberate, tested change.
 _PIP_PINS = [
-    "torch",
+    "torch==2.12.0",
     "torchao==0.5.0",
     "torchtune==0.4.0",
-    "kagglehub<0.3",
-    "huggingface_hub[cli]",
-    "transformers",
-    "datasets",
+    "kagglehub==0.2.9",
+    "huggingface_hub[cli]==1.19.0",
+    "transformers==5.12.0",
+    "datasets==5.0.0",
 ]
 
 

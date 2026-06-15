@@ -20,8 +20,9 @@ The backend dispatch + de-shell work already landed (PR #1 on `main`):
   `*.merge.json`); `local_runner.sh` and the bash wrappers are gone.
 - **What is still non-hermetic** (by design, deferred here):
   - `runtime/local_runner/local_train.py` is a thin orchestrator — it creates a
-    runtime venv, `pip install`s torch/torchtune, downloads the HF model, and
-    shells `tune run`. Network + host accelerator; not hermetic.
+    runtime venv, `pip install`s a now **fully-pinned** dep set (the validated
+    MPS regime), downloads the HF model, and shells `tune run`. Reproducible, but
+    still non-hermetic: runtime network + host accelerator, not Bazel-vendored.
   - `runtime/runpod_orchestrator/src/main.rs` does **build-time manifest synth
     only** (`write-jobspec` + `write-runpod-manifest`); the dead `run` stub was
     removed (it duplicated `@rules_runpod`). The working RunPod path is the
@@ -38,13 +39,17 @@ points at, with no runtime venv and no `@rules_runpod` dependency.
 
 Replace the runtime venv with Bazel-vendored deps + in-process torchtune.
 
-1. **Lock the training deps.** Pin the working triangle (the comment set:
-   `torch`, `torchtune==0.4.0`, `torchao==0.5.0`, `kagglehub<0.3`,
-   `huggingface_hub[cli]`, `transformers`, `datasets`) into a
-   `runtime/local_runner/requirements.txt` and compile a fully-resolved
-   `requirements.lock`. **Landmine:** this triangle breaks on nearly every
-   unpinned release; lock it once, on the target Python (3.11), and treat
-   bumping it as a deliberate, tested change.
+1. **Lock the training deps. ✅ DONE (both runners, real-hardware verified).**
+   The local runner's `_PIP_PINS` is fully pinned to the validated MPS regime
+   (`torch==2.12.0`, `torchtune==0.4.0`, `torchao==0.5.0`, `kagglehub==0.2.9`,
+   `huggingface_hub[cli]==1.19.0`, `transformers==5.12.0`, `datasets==5.0.0`),
+   verified by a **fresh-venv** train on Apple-Silicon MPS. The runpod backend's
+   setup is pinned to a separate **torch-2.4** set matched to its base image
+   (rules_lora 0.1.2), verified on a **real RunPod CUDA pod**. The two regimes
+   can't share one set (different torch). **Landmine remains:** the triangle
+   breaks on unpinned releases — treat any bump as a deliberate, tested change on
+   the target Python. What's *not* done is steps 2–5: turning these pinned sets
+   into Bazel-vendored wheels (they're still runtime `pip install`s).
 2. **`pip.parse` in `MODULE.bazel`** over the lock, exposing `@lora_pip//torch`,
    `@lora_pip//torchtune`, etc. Use **platform-conditional** requirement sets:
    MPS (mac arm64) vs CPU vs CUDA wheels are different downloads — `select()` the

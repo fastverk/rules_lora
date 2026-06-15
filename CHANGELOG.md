@@ -5,6 +5,22 @@ All notable changes to rules_lora. The format is loosely
 mirror the published bazel-registry entries. This repo is public
 (`github.com/fastverk/rules_lora`).
 
+## 0.1.3 — local runner: fully-pinned dep set (fresh-venv verified)
+
+Applies the same fragility fix as 0.1.2 (runpod), now to the `local` backend.
+`local_train.py`'s `_PIP_PINS` left `torch`/`huggingface_hub`/`transformers`/
+`datasets` **unpinned**, so a fresh venv drifted onto whatever was latest — the
+exact drift that broke the runpod setup. Pinned to the validated **MPS regime**
+(`torch==2.12.0`, `torchao==0.5.0`, `torchtune==0.4.0`, `kagglehub==0.2.9`,
+`huggingface_hub[cli]==1.19.0`, `transformers==5.12.0`, `datasets==5.0.0`) and
+verified by a **fresh-venv** train on Apple-Silicon MPS (5 steps, real adapter).
+
+This is a *different* set from the runpod backend's torch-2.4 pins — the two
+can't share one (the local Mac uses the latest torch; the runpod path is pinned
+to its older base image). Completes "lock the training deps" for both runners
+(`docs/hermetic-runners-roadmap.md` Track 1, step 1); Bazel-vendoring the wheels
+(steps 2–5) remains a dedicated, multi-platform effort.
+
 ## 0.1.2 — runpod backend: size-aware builder + pinned setup (real-GPU verified)
 
 Makes the `runpod` backend actually train, verified **end-to-end on a real
