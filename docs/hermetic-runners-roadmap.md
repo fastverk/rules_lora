@@ -1,10 +1,18 @@
 # Hermetic LoRA runners — roadmap
 
-Status: **deferred to a dedicated, on-hardware session.** This is the one piece
-of the rules_lora runner work that cannot be verified without a GPU/MPS box and
-a live RunPod account, so it is written up here rather than half-built. A hollow
-scaffold (stubbed pod lifecycle, fake torch lock) is *worse* than the working
-venv + `@rules_runpod` paths that ship today — don't merge one.
+Status: **step 1 (lock the deps) DONE + real-hardware verified; steps 2–5
+(Bazel wheel-vendoring) deliberately banked.** Both runners now pin their dep
+sets — local to the MPS regime (fresh-venv verified), runpod to a torch-2.4 set
+matched to its base image (verified on a real RunPod CUDA pod). That removes the
+fragility that motivated this doc. Vendoring the wheels via `pip.parse` is an
+*optimization of working, reproducible paths* — and the training itself is
+inherently non-hermetic (it needs the GPU/MPS host and downloads the base
+model), so the marginal value is low. **Decision (2026-06): do not build the
+vendoring rewrite until there's a concrete driver** (e.g. offline/air-gapped CI,
+or a hard no-runtime-network requirement). The steps below stay as the plan for
+that day. A hollow scaffold (stubbed pod lifecycle, fake torch lock, half-wired
+`select()`) is *worse* than the working pinned venv + `@rules_runpod` paths that
+ship today — don't merge one.
 
 ## Where we are now (shipped)
 
