@@ -286,24 +286,23 @@ fn write_runpod_manifest(a: WriteRunpodManifestArgs) -> Result<()> {
         .map(|s| format!("\"{}\"", s.trim()))
         .collect::<Vec<_>>()
         .join(", ");
+    // The size-specific builder lets us avoid threading every architectural
+    // arg (vocab_size / num_heads / …) through the manifest, but the size must
+    // come from the base model, not be hardcoded per family — see lora_builder.
     let family_components = match a.family.as_str() {
         "qwen2" => FamilyComponents {
             tokenizer: "torchtune.models.qwen2.qwen2_tokenizer",
-            // Use the size-specific builder so we don't have to thread
-            // every architectural arg (vocab_size / num_heads / …)
-            // through the manifest. 1.5B is hardcoded for the agora
-            // parser; v0.0.13 generalizes to a `--family-variant` arg.
-            model_lora: "torchtune.models.qwen2.lora_qwen2_1_5b",
+            model_lora: lora_builder(&a.family, &a.base_id)?,
             checkpoint_model_type: "QWEN2",
         },
         "llama3" => FamilyComponents {
             tokenizer: "torchtune.models.llama3.llama3_tokenizer",
-            model_lora: "torchtune.models.llama3.lora_llama3",
+            model_lora: lora_builder(&a.family, &a.base_id)?,
             checkpoint_model_type: "LLAMA3",
         },
         "mistral" => FamilyComponents {
             tokenizer: "torchtune.models.mistral.mistral_tokenizer",
-            model_lora: "torchtune.models.mistral.lora_mistral",
+            model_lora: lora_builder(&a.family, &a.base_id)?,
             checkpoint_model_type: "MISTRAL",
         },
         other => anyhow::bail!(
@@ -326,8 +325,74 @@ fn write_runpod_manifest(a: WriteRunpodManifestArgs) -> Result<()> {
 
 struct FamilyComponents {
     tokenizer: &'static str,
-    model_lora: &'static str,
+    model_lora: String,
     checkpoint_model_type: &'static str,
+}
+
+/// The size-suffixed torchtune LoRA model builder for a family + base model.
+/// The builder depends on the base model's *parameter size* (Qwen2.5-0.5B ships
+/// `lora_qwen2_0_5b`, 1.5B ships `lora_qwen2_1_5b`, …), not the family alone —
+/// picking the wrong size fails at checkpoint load with a tensor size mismatch
+/// (e.g. `norm.scale` 896 vs 1536 for 0.5B vs 1.5B). Mirror of the local
+/// runner's `_model_builder` (runtime/local_runner/local_train.py); both paths
+/// previously hardcoded `lora_qwen2_1_5b` and broke for every other qwen2 size.
+fn lora_builder(family: &str, base_id: &str) -> Result<String> {
+    let size = parse_param_size(base_id);
+    match family {
+        "qwen2" => {
+            let s = size.with_context(|| {
+                format!("cannot parse model size from base_id '{base_id}'")
+            })?;
+            Ok(format!("torchtune.models.qwen2.lora_qwen2_{s}b"))
+        }
+        "llama3" => Ok(match size {
+            Some(s) => format!("torchtune.models.llama3.lora_llama3_{s}b"),
+            None => "torchtune.models.llama3.lora_llama3_8b".to_string(),
+        }),
+        "mistral" => Ok("torchtune.models.mistral.lora_mistral".to_string()),
+        other => anyhow::bail!(
+            "unknown model family '{}'. Supported: qwen2 / llama3 / mistral.",
+            other
+        ),
+    }
+}
+
+/// Extract the parameter-count token from an HF model id as a builder suffix:
+/// the first number immediately followed by `b`/`B` at a non-alphanumeric
+/// boundary, with `.` mapped to `_` (`Qwen/Qwen2.5-0.5B-Instruct` → `0_5`,
+/// `meta-llama/Meta-Llama-3-8B` → `8`). Returns None when no size token is
+/// present. The leading series number (`2.5` in `Qwen2.5`) is skipped because
+/// it is not followed by `b`/`B`.
+fn parse_param_size(base_id: &str) -> Option<String> {
+    let b = base_id.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if !b[i].is_ascii_digit() {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < b.len() && b[i].is_ascii_digit() {
+            i += 1;
+        }
+        // optional single fractional part (e.g. the `.5` of `0.5`)
+        if i + 1 < b.len() && b[i] == b'.' && b[i + 1].is_ascii_digit() {
+            i += 1; // consume '.'
+            while i < b.len() && b[i].is_ascii_digit() {
+                i += 1;
+            }
+        }
+        // a size token is `<number>` then b/B then a non-alphanumeric boundary
+        if i < b.len() && (b[i] == b'b' || b[i] == b'B') {
+            let after = i + 1;
+            let boundary = after >= b.len() || !b[after].is_ascii_alphanumeric();
+            if boundary {
+                return Some(base_id[start..i].replace('.', "_"));
+            }
+        }
+        // not a size token; `i` already advanced past this number — keep scanning
+    }
+    None
 }
 
 fn render_manifest_toml(
@@ -640,4 +705,52 @@ cloud_type = "{cloud_type}"{volume_block}
         grad_accum_steps = a.grad_accum_steps,
         epochs = a.epochs,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{lora_builder, parse_param_size};
+
+    #[test]
+    fn param_size_from_hf_ids() {
+        // The leading series number (2.5) is skipped; the size token wins.
+        assert_eq!(parse_param_size("Qwen/Qwen2.5-0.5B-Instruct").as_deref(), Some("0_5"));
+        assert_eq!(parse_param_size("Qwen/Qwen2.5-1.5B-Instruct").as_deref(), Some("1_5"));
+        assert_eq!(parse_param_size("Qwen/Qwen2.5-7B-Instruct").as_deref(), Some("7"));
+        assert_eq!(parse_param_size("meta-llama/Meta-Llama-3-8B").as_deref(), Some("8"));
+        // No size token present.
+        assert_eq!(parse_param_size("some/base-model"), None);
+    }
+
+    #[test]
+    fn qwen2_builder_is_size_aware() {
+        // The regression: a 0.5B base must NOT map to the 1.5B builder.
+        assert_eq!(
+            lora_builder("qwen2", "Qwen/Qwen2.5-0.5B-Instruct").unwrap(),
+            "torchtune.models.qwen2.lora_qwen2_0_5b"
+        );
+        assert_eq!(
+            lora_builder("qwen2", "Qwen/Qwen2.5-1.5B-Instruct").unwrap(),
+            "torchtune.models.qwen2.lora_qwen2_1_5b"
+        );
+        // qwen2 requires a parseable size.
+        assert!(lora_builder("qwen2", "Qwen/Qwen-sized-wrong").is_err());
+    }
+
+    #[test]
+    fn llama3_defaults_to_8b_mistral_is_fixed() {
+        assert_eq!(
+            lora_builder("llama3", "meta-llama/Meta-Llama-3-8B").unwrap(),
+            "torchtune.models.llama3.lora_llama3_8b"
+        );
+        // llama3 with no parseable size falls back to the 8B builder.
+        assert_eq!(
+            lora_builder("llama3", "meta-llama/llama3-base").unwrap(),
+            "torchtune.models.llama3.lora_llama3_8b"
+        );
+        assert_eq!(
+            lora_builder("mistral", "mistralai/Mistral-7B-v0.3").unwrap(),
+            "torchtune.models.mistral.lora_mistral"
+        );
+    }
 }
