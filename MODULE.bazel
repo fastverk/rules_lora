@@ -8,7 +8,7 @@
 
 module(
     name = "rules_lora",
-    version = "0.1.3",
+    version = "0.1.4",
 )
 
 bazel_dep(name = "platforms", version = "1.0.0")
@@ -25,13 +25,14 @@ bazel_dep(name = "rules_rust", version = "0.70.0")
 # rules_runpod — backs the `runpod` backend of `lora_train`. The
 # `lora_train(backend = "runpod", ...)` macro emits a synthesized
 # manifest + `runpod_job` so the user can `bazel run :<train>.run`
-# end-to-end. Sibling premium repo.
+# end-to-end.
+#
+# This carried a local_path_override onto ../rules_runpod — a sibling-checkout
+# convenience that shipped in every published version from 0.0.10 on. It
+# resolves from the registry now; verified by building //... with no override
+# in play. Use --override_module in a gitignored .bazelrc.user for sibling
+# development, so it cannot be published again.
 bazel_dep(name = "rules_runpod", version = "0.0.11")
-local_path_override(
-    module_name = "rules_runpod",
-    path = "../rules_runpod",
-)
-
 # rules_proto — the LoRA contract (TrainingJobSpec, AdapterArtifact,
 # ExpertManifest envelope) is proto-defined so consumers in Rust,
 # Python, and Lean can speak the same schema.
